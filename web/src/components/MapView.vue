@@ -150,6 +150,15 @@ onMounted(async () => {
     },
     center: [39.745, 43.614],
     zoom: 14,
+    transformRequest: (url) => {
+      if (!url.includes('/tiles/') || !auth.state.token) {
+        return;
+      }
+      return {
+        url,
+        headers: { Authorization: `Bearer ${auth.state.token}` },
+      };
+    },
   });
 
   map.addControl(new maplibregl.NavigationControl(), 'top-right');

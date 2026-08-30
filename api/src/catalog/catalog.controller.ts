@@ -24,7 +24,6 @@ import {
 
 @Controller('catalog')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
-@RequirePermissions('object-types:manage')
 export class CatalogController {
   constructor(private readonly catalogService: CatalogService) {}
 
@@ -33,32 +32,42 @@ export class CatalogController {
     return this.catalogService.listLayers();
   }
 
-  @Post('layers')
-  createLayer(@Body() dto: CreateLayerDto) {
-    return this.catalogService.createLayer(dto);
-  }
-
-  @Patch('layers/:id')
-  updateLayer(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateLayerDto) {
-    return this.catalogService.updateLayer(id, dto);
-  }
-
-  @Delete('layers/:id')
-  removeLayer(@Param('id', ParseIntPipe) id: number) {
-    return this.catalogService.removeLayer(id);
-  }
-
   @Get('object-types')
   listObjectTypes() {
     return this.catalogService.listObjectTypes();
   }
 
+  @Get('relation-types')
+  listRelationTypes() {
+    return this.catalogService.listRelationTypes();
+  }
+
+  @Post('layers')
+  @RequirePermissions('object-types:manage')
+  createLayer(@Body() dto: CreateLayerDto) {
+    return this.catalogService.createLayer(dto);
+  }
+
+  @Patch('layers/:id')
+  @RequirePermissions('object-types:manage')
+  updateLayer(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateLayerDto) {
+    return this.catalogService.updateLayer(id, dto);
+  }
+
+  @Delete('layers/:id')
+  @RequirePermissions('object-types:manage')
+  removeLayer(@Param('id', ParseIntPipe) id: number) {
+    return this.catalogService.removeLayer(id);
+  }
+
   @Post('object-types')
+  @RequirePermissions('object-types:manage')
   createObjectType(@Body() dto: CreateObjectTypeDto) {
     return this.catalogService.createObjectType(dto);
   }
 
   @Patch('object-types/:id')
+  @RequirePermissions('object-types:manage')
   updateObjectType(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateObjectTypeDto,
@@ -67,21 +76,19 @@ export class CatalogController {
   }
 
   @Delete('object-types/:id')
+  @RequirePermissions('object-types:manage')
   removeObjectType(@Param('id', ParseIntPipe) id: number) {
     return this.catalogService.removeObjectType(id);
   }
 
-  @Get('relation-types')
-  listRelationTypes() {
-    return this.catalogService.listRelationTypes();
-  }
-
   @Post('relation-types')
+  @RequirePermissions('object-types:manage')
   createRelationType(@Body() dto: CreateRelationTypeDto) {
     return this.catalogService.createRelationType(dto);
   }
 
   @Patch('relation-types/:id')
+  @RequirePermissions('object-types:manage')
   updateRelationType(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateRelationTypeDto,
@@ -90,6 +97,7 @@ export class CatalogController {
   }
 
   @Delete('relation-types/:id')
+  @RequirePermissions('object-types:manage')
   removeRelationType(@Param('id', ParseIntPipe) id: number) {
     return this.catalogService.removeRelationType(id);
   }

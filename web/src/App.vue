@@ -1,38 +1,29 @@
 <script setup>
-import { onMounted, onBeforeUnmount, ref } from 'vue';
-import maplibregl from 'maplibre-gl';
-import 'maplibre-gl/dist/maplibre-gl.css';
+import { computed, onMounted } from 'vue';
+import { auth } from './auth';
+import LoginForm from './components/LoginForm.vue';
+import MapView from './components/MapView.vue';
 
-const mapContainer = ref(null);
-let map = null;
+const ready = computed(() => auth.state.loaded);
+const loggedIn = computed(() => !!auth.state.user);
 
 onMounted(() => {
-  map = new maplibregl.Map({
-    container: mapContainer.value,
-    style: {
-      version: 8,
-      sources: {},
-      layers: [],
-    },
-    center: [37.6173, 55.7558],
-    zoom: 10,
-  });
-
-  map.addControl(new maplibregl.NavigationControl(), 'top-right');
-});
-
-onBeforeUnmount(() => {
-  map?.remove();
+  auth.loadUser();
 });
 </script>
 
 <template>
-  <div ref="mapContainer" class="map"></div>
+  <LoginForm v-if="ready && !loggedIn" @success="auth.loadUser" />
+  <MapView v-else-if="ready && loggedIn" />
+  <div v-else class="boot">Загрузка…</div>
 </template>
 
 <style scoped>
-.map {
-  width: 100%;
-  height: 100vh;
+.boot {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6b7280;
 }
 </style>

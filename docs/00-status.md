@@ -44,16 +44,14 @@ Claims: `sub` (user), `name`, `role`, `permissions[]`. Подписан общи
 
 - Фаза 0 (план): ✅ (документация в docs/)
 - Фаза 1 (скелет): ✅ — весь стек работает, цепочка JWT проверена
-- Фаза 2 (ядро): 🟡 — 2.1 ✅ (миграции БД + seed), 2.2 ✅ (generic-CRUD объектов), **2.3 ✅ (отдельное приложение `admin` + CRUD справочников)**. Следующий шаг 2.4 (Martin + MVT)
+- Фаза 2 (ядро): 🟡 — 2.1 ✅ (миграции БД + seed), 2.2 ✅ (generic-CRUD объектов), 2.3 ✅ (отдельное приложение `admin` + CRUD справочников), 2.5 ✅ (web: карта со слоями из каталога + OSM-растр), 2.6 ✅ (переключатель слоёв по правам). Следующий шаг 2.4 (Martin + MVT)
 - Фазы 3–5: не начаты
 - Фаза 6 (geo + Dadata): запланирована, строится после фазы 2
 
 ## Ближайшие задачи (по порядку)
 
 1. **2.4** Martin + MVT, фильтр по правам через JWT-claims.
-2. **2.5** web: карта со слоями + подложка OSM-растр (dev).
-3. **2.6** web: переключатель слоёв по правам.
-4. Далее фаза 3 (RBAC), 4 (редактирование geoman, редактор attrs_schema в admin), 5 (OSM self-hosted, бэкап, TLS), 6 (geo + Dadata).
+2. Далее фаза 3 (RBAC), 4 (редактирование geoman, редактор attrs_schema в admin), 5 (OSM self-hosted, бэкап, TLS), 6 (geo + Dadata).
 
 ## Полезные команды
 
@@ -64,6 +62,8 @@ docker compose logs -f api       # логи
 curl http://localhost/api/health # health api
 # логин engineer:
 curl -X POST http://localhost/mock-auth/login -H 'Content-Type: application/json' -d '{"username":"engineer"}'
+# демо-данные на карту (столбы/линии/дома в Москве, только dev):
+docker compose exec -T db psql -U gis -d gis < infra/db/demo-seed.sql
 ```
 
 ## Открытые вопросы

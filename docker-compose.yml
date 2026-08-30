@@ -1,0 +1,92 @@
+name: dmap
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: dmap-db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./infra/db/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - dmap-net
+    restart: unless-stopped
+
+  mock-auth:
+    build: ./mock-auth
+    container_name: dmap-mock-auth
+    environment:
+      PORT: ${MOCK_AUTH_PORT}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:${MOCK_AUTH_PORT}/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dmap-net
+    restart: unless-stopped
+
+  api:
+    build: ./api
+    container_name: dmap-api
+    environment:
+      PORT: ${API_PORT}
+      JWT_SECRET: ${JWT_SECRET}
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB}
+      DB_USER: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - dmap-net
+    restart: unless-stopped
+
+  web:
+    build: ./web
+    container_name: dmap-web
+    environment:
+      VITE_API_URL: /api
+      VITE_TILES_URL: /tiles
+      VITE_MOCK_AUTH_URL: /mock-auth
+    depends_on:
+      - api
+    networks:
+      - dmap-net
+    restart: unless-stopped
+
+  proxy:
+    image: nginx:alpine
+    container_name: dmap-proxy
+    depends_on:
+      - api
+      - web
+      - mock-auth
+    ports:
+      - "${PROXY_HTTP_PORT:-80}:80"
+    volumes:
+      - ./infra/proxy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - dmap-net
+    restart: unless-stopped
+
+volumes:
+  db_data:
+
+networks:
+  dmap-net:
+    driver: bridge

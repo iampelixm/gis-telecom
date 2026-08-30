@@ -23,9 +23,9 @@ GIS-сервис для интернет-провайдера: веб-прило
 
 ## Сервисы (работают)
 
-`proxy`(:80) → `web`(:80), `api`(:3000), `mock-auth`(:3100); `db` PostGIS(:5432); tiles/Martin — ещё не добавлен (2.4); geo + Redis — фаза 6.
+`proxy`(:80) → `web`(:80), `admin`(:80), `api`(:3000), `mock-auth`(:3100); `db` PostGIS(:5432); tiles/Martin — ещё не добавлен (2.4); geo + Redis — фаза 6.
 
-Маршруты через proxy: `/api/*` → api, `/mock-auth/*` → mock-auth, `/` → web.
+Маршруты через proxy: `/api/*` → api, `/mock-auth/*` → mock-auth, `/admin/` → admin (SPA администратора), `/` → web (карта инженера).
 
 Тестовые пользователи mock-auth: `admin` (всё + object-types:manage), `engineer` (read/write по всем объектам), `viewer` (только read).
 
@@ -44,18 +44,16 @@ Claims: `sub` (user), `name`, `role`, `permissions[]`. Подписан общи
 
 - Фаза 0 (план): ✅ (документация в docs/)
 - Фаза 1 (скелет): ✅ — весь стек работает, цепочка JWT проверена
-- Фаза 2 (ядро): 🟡 — 2.1 ✅ (миграции БД + seed). **Следующий шаг 2.2: generic-CRUD объектов** (перед ним — спайк geometry: TypeORM не умеет сам GeoJSON↔EWKB, нужен transformer или raw SQL)
+- Фаза 2 (ядро): 🟡 — 2.1 ✅ (миграции БД + seed), 2.2 ✅ (generic-CRUD объектов), **2.3 ✅ (отдельное приложение `admin` + CRUD справочников)**. Следующий шаг 2.4 (Martin + MVT)
 - Фазы 3–5: не начаты
 - Фаза 6 (geo + Dadata): запланирована, строится после фазы 2
 
 ## Ближайшие задачи (по порядку)
 
-1. **2.2** Generic-CRUD объектов в api + валидация `attrs` по `attrs_schema` (ajv) + права. Первый подпункт — спайк geometry (transformer/raw SQL).
-2. **2.3** CRUD справочников (для админки).
-3. **2.4** Martin + MVT, фильтр по правам через JWT-claims.
-4. **2.5** web: карта со слоями + подложка OSM-растр (dev).
-5. **2.6** web: переключатель слоёв по правам.
-6. Далее фаза 3 (RBAC), 4 (редактирование geoman), 5 (OSM self-hosted, бэкап, TLS), 6 (geo + Dadata).
+1. **2.4** Martin + MVT, фильтр по правам через JWT-claims.
+2. **2.5** web: карта со слоями + подложка OSM-растр (dev).
+3. **2.6** web: переключатель слоёв по правам.
+4. Далее фаза 3 (RBAC), 4 (редактирование geoman, редактор attrs_schema в admin), 5 (OSM self-hosted, бэкап, TLS), 6 (geo + Dadata).
 
 ## Полезные команды
 

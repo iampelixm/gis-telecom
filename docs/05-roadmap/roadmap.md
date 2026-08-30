@@ -31,8 +31,8 @@
 | # | Задача | Статус | Примечание |
 |---|--------|--------|------------|
 | 2.1 | Миграции БД: справочники (layers, object_types, relation_types) + objects + object_relations + seed | ✅ | TypeORM, geometry(4326)+GIST, 5 слоёв/6 типов/4 связи |
-| 2.2 | Generic-CRUD объектов в api (по типам из справочника) + валидация attrs_schema | ⬜ | **сначала спайк geometry: transformer GeoJSON↔EWKB или raw SQL (ST_AsGeoJSON/ST_GeomFromGeoJSON)** |
-| 2.3 | CRUD справочников в api (типы, слои, типы связей) | ⬜ | для админки |
+| 2.2 | Generic-CRUD объектов в api (по типам из справочника) + валидация attrs_schema | ✅ | raw SQL (ST_AsGeoJSON/ST_GeomFromGeoJSON), ajv-валидация attrs, ObjectPermissionGuard |
+| 2.3 | Отдельное приложение `admin` (Vue 3 + TS + Naive UI, `/admin/`) + CRUD справочников в api (типы, слои, типы связей) | ✅ | доступ по `object-types:manage`; duplicate → 409 |
 | 2.4 | tiles: Martin + MVT с фильтром по правам (JWT-claims → request.jwt.claims) | ⬜ | |
 | 2.5 | web: карта со слоями из справочника + подложка OSM-растр (dev) | ⬜ | map-basemap.md |
 | 2.6 | web: переключатель видимости слоёв (по правам) | ⬜ | |
@@ -51,7 +51,7 @@
 |---|--------|--------|------------|
 | 4.1 | Инструменты рисования/редактирования на карте | ⬜ | **maplibre-gl-geoman** |
 | 4.2 | Динамические формы атрибутов по attrs_schema | ⬜ | |
-| 4.3 | Редактор attrs_schema в админке | ⬜ | |
+| 4.3 | Редактор attrs_schema в админке `admin` | ⬜ | |
 | 4.4 | CRUD связей объектов на карте | ⬜ | |
 
 ## Фаза 5. Полировка и OSM self-hosted

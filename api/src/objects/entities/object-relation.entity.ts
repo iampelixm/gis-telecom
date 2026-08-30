@@ -20,7 +20,7 @@ export class ObjectRelation {
   relationTypeId: number;
 
   @ManyToOne(() => RelationType)
-  @JoinColumn({ name: 'relation_type_id' })
+  @JoinColumn({ name: 'relationTypeId' })
   relationType: RelationType;
 
   @Column({ type: 'int' })
@@ -28,7 +28,7 @@ export class ObjectRelation {
   fromObjectId: number;
 
   @ManyToOne(() => ObjectEntity)
-  @JoinColumn({ name: 'from_object_id' })
+  @JoinColumn({ name: 'fromObjectId' })
   fromObject: ObjectEntity;
 
   @Column({ type: 'int' })
@@ -36,7 +36,7 @@ export class ObjectRelation {
   toObjectId: number;
 
   @ManyToOne(() => ObjectEntity)
-  @JoinColumn({ name: 'to_object_id' })
+  @JoinColumn({ name: 'toObjectId' })
   toObject: ObjectEntity;
 
   @Column({ type: 'jsonb', default: {} })

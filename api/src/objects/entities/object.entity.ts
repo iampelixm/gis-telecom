@@ -20,7 +20,7 @@ export class ObjectEntity {
   objectTypeId: number;
 
   @ManyToOne(() => ObjectType)
-  @JoinColumn({ name: 'object_type_id' })
+  @JoinColumn({ name: 'objectTypeId' })
   objectType: ObjectType;
 
   @Column({

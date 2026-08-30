@@ -26,7 +26,7 @@ export class ObjectType {
   layerId: number | null;
 
   @ManyToOne(() => Layer, { nullable: true })
-  @JoinColumn({ name: 'layer_id' })
+  @JoinColumn({ name: 'layerId' })
   layer: Layer | null;
 
   @Column({ type: 'text' })

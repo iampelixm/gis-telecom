@@ -26,7 +26,7 @@ export class RelationType {
   fromTypeId: number;
 
   @ManyToOne(() => ObjectType)
-  @JoinColumn({ name: 'from_type_id' })
+  @JoinColumn({ name: 'fromTypeId' })
   fromType: ObjectType;
 
   @Column({ type: 'int' })
@@ -34,7 +34,7 @@ export class RelationType {
   toTypeId: number;
 
   @ManyToOne(() => ObjectType)
-  @JoinColumn({ name: 'to_type_id' })
+  @JoinColumn({ name: 'toTypeId' })
   toType: ObjectType;
 
   @Column({ type: 'boolean', default: true })

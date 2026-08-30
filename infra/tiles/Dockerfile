@@ -1,11 +1,14 @@
 FROM ubuntu:24.04 AS runtime
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get install -y --no-install-recommends ca-certificates tar \
     && rm -rf /var/lib/apt/lists/*
 
-COPY martin /usr/local/bin/martin
+COPY martin.tar.gz /tmp/martin.tar.gz
 COPY config.yaml /etc/martin/config.yaml
+
+RUN tar -xzf /tmp/martin.tar.gz -C /usr/local/bin \
+    && rm /tmp/martin.tar.gz
 
 ENV MARTIN_CONFIG=/etc/martin/config.yaml
 ENV MARTIN_CONNECTION_POOL_SIZE=8

@@ -33,7 +33,7 @@
 | 2.1 | Миграции БД: справочники (layers, object_types, relation_types) + objects + object_relations + seed | ✅ | TypeORM, geometry(4326)+GIST, 5 слоёв/6 типов/4 связи |
 | 2.2 | Generic-CRUD объектов в api (по типам из справочника) + валидация attrs_schema | ✅ | raw SQL (ST_AsGeoJSON/ST_GeomFromGeoJSON), ajv-валидация attrs, ObjectPermissionGuard |
 | 2.3 | Отдельное приложение `admin` (Vue 3 + TS + Naive UI, `/admin/`) + CRUD справочников в api (типы, слои, типы связей) | ✅ | доступ по `object-types:manage`; duplicate → 409 |
-| 2.4 | tiles: Martin + MVT с фильтром по правам (JWT-claims → request.jwt.claims) | ⬜ | |
+| 2.4 | tiles: Martin + MVT с фильтром по правам (JWT-claims → request.jwt.claims) | ✅ | Martin v1.14.0 (самосбор без features rendering), nginx auth_request → /api/me → X-Object-Types → SQL-функция tiles_objects(z,x,y,query_params json), ST_AsMVT; web переведён на векторный source |
 | 2.5 | web: карта со слоями из справочника + подложка OSM-растр (dev) | ✅ | login (mock-auth) → MapLibre, слои по типам из каталога, OSM-растр + атрибуция; GET-каталог открыт аутентифицированным, мутации — `object-types:manage` |
 | 2.6 | web: переключатель видимости слоёв (по правам) | ✅ | панель слоёв в web, чекбоксы по типам, недоступные по правам — disabled |
 

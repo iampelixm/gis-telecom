@@ -68,15 +68,4 @@ export const api = {
   objectTypes: {
     list: () => request('/catalog/object-types'),
   },
-
-  objects: {
-    list: (typeCode, bbox, limit = 2000) => {
-      const params = new URLSearchParams({ type: typeCode });
-      if (bbox) {
-        params.set('bbox', bbox);
-      }
-      params.set('limit', String(limit));
-      return request(`/objects?${params}`);
-    },
-  },
 };

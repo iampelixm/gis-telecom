@@ -7,3 +7,4 @@ coverage/
 .vite/
 *.local
 .DS_Store
+infra/tiles/martin

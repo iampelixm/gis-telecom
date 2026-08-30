@@ -11,8 +11,8 @@
 
 ## Статус реализации
 
-- Работают (compose): `proxy`, `web`, `api`, `mock-auth`, `db`.
-- Запланировано: `tiles` (Martin, фаза 2.4), `geo` (Dadata, фаза 6).
+- Работают (compose): `proxy`, `web`, `api`, `mock-auth`, `db`, `tiles` (Martin, MVT).
+- Запланировано: `geo` (Dadata, фаза 6).
 - Админка: отдельное приложение `admin` (фаза 2.3).
 
 ## Схема взаимодействия
@@ -75,10 +75,11 @@
 - **Зависимости:** db (хранение), mock-auth (валидация подписи JWT).
 
 ### 4. `tiles` — сервер векторных тайлов
-- **Стек:** Martin (лёгкий, single-binary; поддержка PostGIS).
+- **Стек:** Martin v1.14.0 (самосбор из исходников; PostGIS-источники, MVT).
 - **Задачи:**
-  - генерация векторных тайлов (MVT) из PostGIS для MapLibre;
+  - генерация векторных тайлов (MVT) из PostGIS для MapLibre (SQL-функция `tiles_objects(z,x,y,query_params json)`);
   - отдаёт слои для отображения.
+- **Авторизация:** Martin не имеет встроенной auth → nginx `auth_request /internal/tile-auth` (→ `/api/me`, валидирует JWT) → из заголовка `X-Object-Types` подставляются права в `?types=...`; без JWT 401.
 - **Зависимости:** db.
 
 ### 5. `db` — хранилище геоданных

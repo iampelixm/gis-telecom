@@ -9,10 +9,10 @@ const mapContainer = ref(null);
 const layers = ref([]);
 const types = ref([]);
 const visible = ref({});
-const loading = ref(false);
+
+const TILES_URL = import.meta.env.VITE_TILES_URL || '/tiles';
 
 let map = null;
-let timer = null;
 
 const grouped = computed(() =>
   layers.value
@@ -29,8 +29,8 @@ function layerForType(t) {
   return `objects-${t.code}`;
 }
 
-function sourceForType(t) {
-  return `src-${t.code}`;
+function sourceForType() {
+  return 'src-objects';
 }
 
 async function loadCatalog() {
@@ -48,19 +48,18 @@ async function loadCatalog() {
   visible.value = initial;
 
   addObjectLayers();
-  await fetchVisible();
 }
 
 function addObjectLayers() {
+  if (!map.getSource(sourceForType())) {
+    map.addSource(sourceForType(), {
+      type: 'vector',
+      tiles: [`${TILES_URL}/objects/{z}/{x}/{y}`],
+      maxzoom: 22,
+    });
+  }
   for (const t of types.value) {
-    const srcId = sourceForType(t);
     const layerId = layerForType(t);
-    if (!map.getSource(srcId)) {
-      map.addSource(srcId, {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] },
-      });
-    }
     if (!map.getLayer(layerId)) {
       map.addLayer(makeLayer(t));
     }
@@ -71,7 +70,13 @@ function makeLayer(t) {
   const color = t.color || '#333333';
   const geom = t.geometryType;
   const layout = { visibility: visible.value[t.code] ? 'visible' : 'none' };
-  const base = { id: layerForType(t), source: sourceForType(t), layout };
+  const base = {
+    id: layerForType(t),
+    source: sourceForType(),
+    'source-layer': 'objects',
+    filter: ['==', 'type', t.code],
+    layout,
+  };
   if (geom === 'point' || geom === 'multipoint') {
     return {
       ...base,
@@ -105,44 +110,6 @@ function makeLayer(t) {
   };
 }
 
-function bboxFromMap() {
-  const b = map.getBounds();
-  return `${b.getWest()},${b.getSouth()},${b.getEast()},${b.getNorth()}`;
-}
-
-async function fetchVisible() {
-  const visibleTypes = types.value.filter((t) => visible.value[t.code]);
-  if (visibleTypes.length === 0) {
-    return;
-  }
-  loading.value = true;
-  const bbox = bboxFromMap();
-  const results = await Promise.allSettled(
-    visibleTypes.map((t) => api.objects.list(t.code, bbox).then((rows) => ({ t, rows }))),
-  );
-  for (const r of results) {
-    if (r.status !== 'fulfilled') continue;
-    const { t, rows } = r.value;
-    const features = rows
-      .filter((row) => row.geometry)
-      .map((row) => ({
-        type: 'Feature',
-        geometry: row.geometry,
-        properties: { id: row.id, ...row.attrs },
-      }));
-    const source = map.getSource(sourceForType(t));
-    if (source) {
-      source.setData({ type: 'FeatureCollection', features });
-    }
-  }
-  loading.value = false;
-}
-
-function onMoveEnd() {
-  clearTimeout(timer);
-  timer = setTimeout(fetchVisible, 400);
-}
-
 function toggleType(t) {
   visible.value[t.code] = !visible.value[t.code];
   const layerId = layerForType(t);
@@ -153,9 +120,6 @@ function toggleType(t) {
       'visibility',
       visible.value[t.code] ? 'visible' : 'none',
     );
-  }
-  if (visible.value[t.code]) {
-    fetchVisible();
   }
 }
 
@@ -189,16 +153,13 @@ onMounted(async () => {
   });
 
   map.addControl(new maplibregl.NavigationControl(), 'top-right');
-  map.on('moveend', onMoveEnd);
 
   map.on('load', loadCatalog);
 });
 
 onBeforeUnmount(() => {
-  clearTimeout(timer);
   map?.remove();
-});
-</script>
+});</script>
 
 <template>
   <div class="map-shell">
@@ -210,7 +171,6 @@ onBeforeUnmount(() => {
         <button class="logout" @click="logout">Выйти</button>
       </div>
       <div class="panel-body">
-        <div v-if="loading" class="loading">Загрузка…</div>
         <div
           v-for="g in grouped"
           :key="g.code"
@@ -291,12 +251,6 @@ onBeforeUnmount(() => {
 .panel-body {
   overflow-y: auto;
   padding: 8px 12px;
-}
-
-.loading {
-  font-size: 12px;
-  color: #6b7280;
-  padding: 4px 0;
 }
 
 .layer-group {

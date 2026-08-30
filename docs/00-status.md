@@ -62,7 +62,7 @@ docker compose logs -f api       # логи
 curl http://localhost/api/health # health api
 # логин engineer:
 curl -X POST http://localhost/mock-auth/login -H 'Content-Type: application/json' -d '{"username":"engineer"}'
-# демо-данные на карту (столбы/линии/дома в Москве, только dev):
+# демо-данные на карту (ул. Макаренко, Сочи; только dev):
 docker compose exec -T db psql -U gis -d gis < infra/db/demo-seed.sql
 ```
 

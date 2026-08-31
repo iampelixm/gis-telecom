@@ -79,7 +79,7 @@
 | 6.2 | geo: mock-эндпоинты (suggest/forward/reverse/company) | ✅ | `MockProvider`, заготовленные адреса Сочи |
 | 6.3 | compose: сервис geo + Redis; nginx: /geo/* → geo | ✅ | контейнеры dmap-geo/dmap-redis, `location /geo/` |
 | 6.4 | geo: кэш-логика (Redis), защита квоты Dadata | ✅ | TTL 7 дней, in-memory fallback, JWT-гвард на все эндпоинты кроме health |
-| 6.5 | geo: провайдер Dadata + проверка исходящего HTTPS | ⬜ | нужны ключи; уточнить поля этажей/квартир |
+| 6.5 | geo: провайдер Dadata + проверка исходящего HTTPS | ✅ | ключи подключены; важно: хост `suggestions.dadata.ru` (не `suggest.dadata.ru` — QRATOR отдаёт 301/HTML); suggest/forward/reverse/company проверены E2E |
 | 6.6 | web: подсказки адресов, обратное геокодирование; расширение attrs_schema house | ✅ | автоподсказки address (suggest), «Определить адрес по точке» (reverse); миграция `1700000000005-house-geo-attrs` (fias_id, kladr_id, address_normalized, floors, apartments) |
 
 ## Фаза 7. UX-полировка и мобильные

@@ -8,7 +8,7 @@ import type {
   ReverseResult,
 } from './geo-provider.interface';
 
-const SUGGEST_URL = 'https://suggest.dadata.ru/suggestions/api/4_1/rs';
+const SUGGEST_URL = 'https://suggestions.dadata.ru/suggestions/api/4_1/rs';
 
 interface DadataSuggestion {
   value: string;

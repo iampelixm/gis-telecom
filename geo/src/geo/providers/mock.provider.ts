@@ -15,6 +15,13 @@ const MOCK_ADDRESSES: Array<{
   lon: number;
   floors?: number;
   apartments?: number;
+  regionWithType?: string;
+  cityWithType?: string;
+  settlementWithType?: string;
+  streetWithType?: string;
+  houseFull?: string;
+  postalCode?: string;
+  qcGeo?: string;
 }> = [
   {
     address: 'Краснодарский край, г. Сочи, ул. Навагинская, д. 5',
@@ -24,6 +31,12 @@ const MOCK_ADDRESSES: Array<{
     lon: 39.72679,
     floors: 5,
     apartments: 30,
+    regionWithType: 'Краснодарский край',
+    cityWithType: 'г. Сочи',
+    streetWithType: 'ул. Навагинская',
+    houseFull: 'д. 5',
+    postalCode: '354000',
+    qcGeo: '2',
   },
   {
     address: 'Краснодарский край, г. Сочи, ул. Навагинская, д. 9',
@@ -33,6 +46,12 @@ const MOCK_ADDRESSES: Array<{
     lon: 39.72619,
     floors: 3,
     apartments: 12,
+    regionWithType: 'Краснодарский край',
+    cityWithType: 'г. Сочи',
+    streetWithType: 'ул. Навагинская',
+    houseFull: 'д. 9',
+    postalCode: '354000',
+    qcGeo: '2',
   },
   {
     address: 'Краснодарский край, г. Сочи, ул. Курортный проспект, д. 105',
@@ -42,6 +61,12 @@ const MOCK_ADDRESSES: Array<{
     lon: 39.74231,
     floors: 9,
     apartments: 72,
+    regionWithType: 'Краснодарский край',
+    cityWithType: 'г. Сочи',
+    streetWithType: 'ул. Курортный проспект',
+    houseFull: 'д. 105',
+    postalCode: '354024',
+    qcGeo: '2',
   },
   {
     address: 'Краснодарский край, г. Сочи, ул. Конституции СССР, д. 20',
@@ -51,6 +76,12 @@ const MOCK_ADDRESSES: Array<{
     lon: 39.73702,
     floors: 6,
     apartments: 48,
+    regionWithType: 'Краснодарский край',
+    cityWithType: 'г. Сочи',
+    streetWithType: 'ул. Конституции СССР',
+    houseFull: 'д. 20',
+    postalCode: '354000',
+    qcGeo: '2',
   },
   {
     address: 'Краснодарский край, г. Сочи, ул. Горького, д. 85',
@@ -60,6 +91,12 @@ const MOCK_ADDRESSES: Array<{
     lon: 39.73108,
     floors: 4,
     apartments: 24,
+    regionWithType: 'Краснодарский край',
+    cityWithType: 'г. Сочи',
+    streetWithType: 'ул. Горького',
+    houseFull: 'д. 85',
+    postalCode: '354000',
+    qcGeo: '2',
   },
 ];
 
@@ -152,6 +189,13 @@ export class MockProvider implements GeoProvider {
       lon: best.lon,
       floors: best.floors,
       apartments: best.apartments,
+      regionWithType: best.regionWithType,
+      cityWithType: best.cityWithType,
+      settlementWithType: best.settlementWithType,
+      streetWithType: best.streetWithType,
+      houseFull: best.houseFull,
+      postalCode: best.postalCode,
+      qcGeo: best.qcGeo,
     };
   }
 

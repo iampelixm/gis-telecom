@@ -23,6 +23,13 @@ export interface ReverseResult {
   lon: number;
   floors?: number;
   apartments?: number;
+  regionWithType?: string;
+  cityWithType?: string;
+  settlementWithType?: string;
+  streetWithType?: string;
+  houseFull?: string;
+  postalCode?: string;
+  qcGeo?: string;
 }
 
 export interface CompanySuggestion {

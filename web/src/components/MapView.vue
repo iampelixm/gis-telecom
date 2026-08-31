@@ -106,6 +106,27 @@ const geoSuggest = reactive({
 });
 let geoDebounce = null;
 
+const geoSearch = reactive({
+  open: false,
+  query: '',
+  results: [],
+  loading: false,
+  error: '',
+  picked: null,
+});
+let geoSearchDebounce = null;
+const geoSearchInputEl = ref(null);
+const geoInfoTool = ref(false);
+const geoInfo = reactive({
+  open: false,
+  loading: false,
+  error: '',
+  data: null,
+  lngLat: null,
+});
+const geoInfoPos = reactive({ x: 10, y: 70 });
+let geoMarker = null;
+
 const ACTION_LABELS = {
   created: 'Создание',
   updated: 'Изменение атрибутов',
@@ -829,11 +850,13 @@ async function reloadRelations() {
     )
     .map((r) => r.code);
   if (codes.length) {
-    try {
-      const res = await api.relations.list({ type: codes.join(','), bbox });
-      fc.features.push(...(res.features || []));
-    } catch (err) {
-      console.error('failed to load relations', err);
+    for (const code of codes) {
+      try {
+        const res = await api.relations.list({ type: code, bbox });
+        fc.features.push(...(res.features || []));
+      } catch (err) {
+        console.error('failed to load relations', err);
+      }
     }
   }
   const rr = relationTypeByCode('route_route');
@@ -1130,6 +1153,12 @@ async function onMapClick(e) {
   if (creatingType.value || editingObjectId.value !== null || !gm?.loaded) {
     return;
   }
+  if (geoInfoTool.value) {
+    geoInfoTool.value = false;
+    updateGeoCursor();
+    await reverseAtPoint(e.lngLat.lng, e.lngLat.lat);
+    return;
+  }
   if (attachMode.value !== null) {
     const rt = routeType();
     if (!rt) {
@@ -1422,6 +1451,164 @@ function closeGeo() {
   geoSuggest.results = [];
 }
 
+function updateGeoCursor() {
+  if (!map) return;
+  map.getCanvas().style.cursor = geoInfoTool.value ? 'crosshair' : '';
+}
+
+function toggleGeoInfoTool() {
+  if (
+    creatingType.value ||
+    editingObjectId.value !== null ||
+    creatingRelation.value
+  ) {
+    return;
+  }
+  geoInfoTool.value = !geoInfoTool.value;
+  updateGeoCursor();
+  if (!geoInfoTool.value) {
+    clearGeoMarker();
+  }
+}
+
+function showGeoMarker(lng, lat) {
+  if (!map) return;
+  if (geoMarker) {
+    geoMarker.remove();
+    geoMarker = null;
+  }
+  const el = document.createElement('div');
+  el.className = 'geo-marker';
+  el.innerHTML = '<div class="geo-marker-pin"></div>';
+  geoMarker = new maplibregl.Marker({ element: el })
+    .setLngLat([lng, lat])
+    .addTo(map);
+}
+
+function clearGeoMarker() {
+  if (geoMarker) {
+    geoMarker.remove();
+    geoMarker = null;
+  }
+}
+
+async function onGeoSearchInput() {
+  clearTimeout(geoSearchDebounce);
+  geoSearch.error = '';
+  const q = geoSearch.query.trim();
+  if (q.length < 3) {
+    geoSearch.open = false;
+    geoSearch.results = [];
+    return;
+  }
+  geoSearchDebounce = setTimeout(async () => {
+    geoSearch.loading = true;
+    try {
+      const res = await api.geo.suggest(q);
+      geoSearch.results = (res.suggestions || []).slice(0, 8);
+      geoSearch.open = geoSearch.results.length > 0;
+    } catch (err) {
+      geoSearch.error = err?.message || String(err);
+      geoSearch.open = false;
+      geoSearch.results = [];
+    } finally {
+      geoSearch.loading = false;
+    }
+  }, 300);
+}
+
+function closeGeoSearch() {
+  clearTimeout(geoSearchDebounce);
+  geoSearch.open = false;
+  geoSearch.results = [];
+  geoSearch.query = '';
+  geoSearch.error = '';
+  geoSearch.picked = null;
+}
+
+async function pickGeoAddress(s) {
+  geoSearch.open = false;
+  geoSearch.query = s.value || '';
+  geoSearch.loading = true;
+  geoSearch.error = '';
+  let lat = s.lat;
+  let lon = s.lon;
+  try {
+    if (lat == null || lon == null) {
+      const fwd = await api.geo.forward(s.value || s.unrestrictedValue);
+      if (!fwd) {
+        geoSearch.error = 'Адрес не найден';
+        return;
+      }
+      lat = fwd.lat;
+      lon = fwd.lon;
+    }
+    if (map && Number.isFinite(lat) && Number.isFinite(lon)) {
+      showGeoMarker(lon, lat);
+      map.flyTo({ center: [lon, lat], zoom: Math.max(map.getZoom(), 16) });
+      geoSearch.picked = { ...s, lat, lon };
+    }
+  } catch (err) {
+    geoSearch.error = err?.message || String(err);
+  } finally {
+    geoSearch.loading = false;
+  }
+}
+
+function openGeoInfoPanel(lng, lat) {
+  geoInfo.lngLat = [lng, lat];
+  geoInfo.open = true;
+  const w = Math.min(320, window.innerWidth - 24);
+  geoInfoPos.x = Math.max(12, window.innerWidth - w - 12);
+  geoInfoPos.y = 70;
+}
+
+async function reverseAtPoint(lng, lat) {
+  geoInfo.loading = true;
+  geoInfo.error = '';
+  geoInfo.data = null;
+  showGeoMarker(lng, lat);
+  openGeoInfoPanel(lng, lat);
+  try {
+    const res = await api.geo.reverse(lat, lng);
+    if (!res) {
+      geoInfo.error = 'Не удалось определить адрес';
+      geoInfo.data = null;
+    } else {
+      geoInfo.data = res;
+    }
+  } catch (err) {
+    geoInfo.error = err?.message || String(err);
+    geoInfo.data = null;
+  } finally {
+    geoInfo.loading = false;
+  }
+}
+
+function closeGeoInfo() {
+  geoInfo.open = false;
+  geoInfo.data = null;
+  geoInfo.error = '';
+  geoInfo.loading = false;
+  clearGeoMarker();
+}
+
+function onGlobalKeydown(e) {
+  if (e.key !== 'Escape') return;
+  if (geoSearch.open) {
+    geoSearch.open = false;
+    return;
+  }
+  if (geoInfoTool.value) {
+    geoInfoTool.value = false;
+    updateGeoCursor();
+    return;
+  }
+  if (geoInfo.open) {
+    closeGeoInfo();
+  }
+}
+
 function showObjectGeometry() {
   const id = modal.objectId;
   const code = modal.typeCode;
@@ -1623,11 +1810,16 @@ onMounted(async () => {
 
   map.addControl(new maplibregl.NavigationControl(), 'top-right');
 
+  window.addEventListener('keydown', onGlobalKeydown);
+
   map.on('load', loadCatalog);
   map.on('click', onMapClick);
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onGlobalKeydown);
+  clearTimeout(geoSearchDebounce);
+  clearGeoMarker();
   map.off('moveend', onMoveEnd);
   if (gm) {
     map.off('gm:create', onFeatureCreated);
@@ -1651,6 +1843,58 @@ onBeforeUnmount(() => {
     >
       {{ panelOpen ? '✕' : '≡' }}
     </button>
+
+    <div class="geo-bar">
+      <div class="geo-search-wrap">
+        <input
+          ref="geoSearchInputEl"
+          v-model="geoSearch.query"
+          class="geo-search-input"
+          type="text"
+          placeholder="Поиск адреса"
+          autocomplete="off"
+          @input="onGeoSearchInput"
+          @focus="geoSearch.open = geoSearch.results.length > 0"
+          @keydown.esc.prevent="closeGeoSearch"
+        />
+        <button
+          v-if="geoSearch.query || geoSearch.open"
+          class="geo-search-clear"
+          type="button"
+          title="Очистить"
+          @click="closeGeoSearch"
+        >✕</button>
+        <div v-if="geoSearch.loading" class="geo-search-status">Поиск…</div>
+        <div v-if="geoSearch.error" class="geo-search-status geo-search-error">{{ geoSearch.error }}</div>
+        <div v-if="geoSearch.open && geoSearch.results.length" class="geo-search-results">
+          <button
+            v-for="s in geoSearch.results"
+            :key="s.value"
+            class="geo-search-item"
+            type="button"
+            @mousedown.prevent="pickGeoAddress(s)"
+          >
+            <span class="geo-search-item-text">{{ s.value }}</span>
+            <span v-if="s.lat != null && s.lon != null" class="geo-search-item-coords">
+              {{ Number(s.lat).toFixed(4) }}, {{ Number(s.lon).toFixed(4) }}
+            </span>
+          </button>
+        </div>
+      </div>
+      <button
+        class="geo-tool-btn"
+        :class="{ active: geoInfoTool }"
+        type="button"
+        title="Адрес по точке: кликните на карту"
+        @click="toggleGeoInfoTool"
+      >
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="7"></circle>
+          <path d="M12 2v3M12 19v3M2 12h3M19 12h3"></path>
+        </svg>
+        <span class="geo-tool-label">Адрес по точке</span>
+      </button>
+    </div>
 
     <aside
       ref="panelEl"
@@ -1921,6 +2165,77 @@ onBeforeUnmount(() => {
           <button @click="attachMode = null">Отмена</button>
         </div>
       </template>
+    </FloatPanel>
+
+    <FloatPanel
+      v-if="geoInfo.open"
+      title="Адрес по точке"
+      :open="geoInfo.open"
+      dock="float"
+      :pos="geoInfoPos"
+      width="320"
+      closable
+      @close="closeGeoInfo"
+    >
+      <div class="geo-info">
+        <div v-if="geoInfo.loading" class="geo-info-status">Определяем адрес…</div>
+        <div v-else-if="geoInfo.error" class="geo-info-status geo-info-error">{{ geoInfo.error }}</div>
+        <template v-else-if="geoInfo.data">
+          <div class="geo-info-address">{{ geoInfo.data.address || '—' }}</div>
+          <div class="geo-info-grid">
+            <div v-if="geoInfo.data.regionWithType" class="geo-info-row">
+              <span class="geo-info-label">Регион</span>
+              <span class="geo-info-value">{{ geoInfo.data.regionWithType }}</span>
+            </div>
+            <div v-if="geoInfo.data.cityWithType" class="geo-info-row">
+              <span class="geo-info-label">Город</span>
+              <span class="geo-info-value">{{ geoInfo.data.cityWithType }}</span>
+            </div>
+            <div v-if="geoInfo.data.settlementWithType" class="geo-info-row">
+              <span class="geo-info-label">Нас. пункт</span>
+              <span class="geo-info-value">{{ geoInfo.data.settlementWithType }}</span>
+            </div>
+            <div v-if="geoInfo.data.streetWithType" class="geo-info-row">
+              <span class="geo-info-label">Улица</span>
+              <span class="geo-info-value">{{ geoInfo.data.streetWithType }}</span>
+            </div>
+            <div v-if="geoInfo.data.houseFull" class="geo-info-row">
+              <span class="geo-info-label">Дом</span>
+              <span class="geo-info-value">{{ geoInfo.data.houseFull }}</span>
+            </div>
+            <div v-if="geoInfo.data.floors != null" class="geo-info-row">
+              <span class="geo-info-label">Этажей</span>
+              <span class="geo-info-value">{{ geoInfo.data.floors }}</span>
+            </div>
+            <div v-if="geoInfo.data.apartments != null" class="geo-info-row">
+              <span class="geo-info-label">Квартир</span>
+              <span class="geo-info-value">{{ geoInfo.data.apartments }}</span>
+            </div>
+            <div v-if="geoInfo.data.postalCode" class="geo-info-row">
+              <span class="geo-info-label">Индекс</span>
+              <span class="geo-info-value">{{ geoInfo.data.postalCode }}</span>
+            </div>
+            <div v-if="geoInfo.data.fiasId" class="geo-info-row">
+              <span class="geo-info-label">ФИАС</span>
+              <span class="geo-info-value geo-info-mono">{{ geoInfo.data.fiasId }}</span>
+            </div>
+            <div v-if="geoInfo.data.kladrId" class="geo-info-row">
+              <span class="geo-info-label">КЛАДР</span>
+              <span class="geo-info-value geo-info-mono">{{ geoInfo.data.kladrId }}</span>
+            </div>
+            <div v-if="geoInfo.data.qcGeo" class="geo-info-row">
+              <span class="geo-info-label">Точность</span>
+              <span class="geo-info-value">{{ geoInfo.data.qcGeo }}</span>
+            </div>
+            <div v-if="geoInfo.data.lat != null && geoInfo.data.lon != null" class="geo-info-row">
+              <span class="geo-info-label">Координаты</span>
+              <span class="geo-info-value geo-info-mono">
+                {{ Number(geoInfo.data.lat).toFixed(6) }}, {{ Number(geoInfo.data.lon).toFixed(6) }}
+              </span>
+            </div>
+          </div>
+        </template>
+      </div>
     </FloatPanel>
 
     <div v-if="fabOpen" class="fab-menu">
@@ -3051,6 +3366,219 @@ button.danger:disabled {
   cursor: not-allowed;
 }
 
+.geo-bar {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  z-index: 2;
+  max-width: calc(100% - 120px);
+}
+
+.geo-search-wrap {
+  position: relative;
+  width: 300px;
+  max-width: 100%;
+}
+
+.geo-search-input {
+  width: 100%;
+  height: 38px;
+  padding: 0 34px 0 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 14px;
+  color: #111827;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  outline: none;
+}
+
+.geo-search-input:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+}
+
+.geo-search-clear {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  color: #9ca3af;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.geo-search-clear:hover {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.geo-search-results {
+  position: absolute;
+  top: 42px;
+  left: 0;
+  right: 0;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+  z-index: 3;
+}
+
+.geo-search-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  background: #fff;
+  text-align: left;
+  font-size: 13px;
+  color: #111827;
+  cursor: pointer;
+}
+
+.geo-search-item:hover {
+  background: #f3f4f6;
+}
+
+.geo-search-item-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.geo-search-item-coords {
+  flex-shrink: 0;
+  color: #9ca3af;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.geo-search-status {
+  position: absolute;
+  top: 42px;
+  left: 0;
+  right: 0;
+  padding: 8px 12px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+  font-size: 13px;
+  color: #6b7280;
+  z-index: 3;
+}
+
+.geo-search-status.geo-search-error {
+  color: #dc2626;
+}
+
+.geo-tool-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #fff;
+  color: #374151;
+  font-size: 13px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  white-space: nowrap;
+}
+
+.geo-tool-btn:hover {
+  border-color: #6366f1;
+  color: #4f46e5;
+}
+
+.geo-tool-btn.active {
+  background: #4f46e5;
+  border-color: #4f46e5;
+  color: #fff;
+}
+
+.geo-info {
+  padding: 12px;
+  font-size: 13px;
+}
+
+.geo-info-status {
+  padding: 10px 2px;
+  color: #6b7280;
+}
+
+.geo-info-status.geo-info-error {
+  color: #dc2626;
+}
+
+.geo-info-address {
+  font-size: 14px;
+  font-weight: 600;
+  color: #111827;
+  margin-bottom: 10px;
+}
+
+.geo-info-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.geo-info-row {
+  display: flex;
+  gap: 8px;
+}
+
+.geo-info-label {
+  flex-shrink: 0;
+  width: 84px;
+  color: #6b7280;
+}
+
+.geo-info-value {
+  flex: 1;
+  min-width: 0;
+  color: #111827;
+  word-break: break-word;
+}
+
+.geo-info-value.geo-info-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.geo-marker {
+  width: 18px;
+  height: 18px;
+}
+
+.geo-marker-pin {
+  width: 14px;
+  height: 14px;
+  margin: 2px;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  background: #ef4444;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
 @media (max-width: 700px) {
   .panel-toggle {
     display: flex;
@@ -3192,6 +3720,22 @@ button.danger:disabled {
   .panel-header-actions {
     flex-wrap: wrap;
     justify-content: flex-end;
+  }
+
+  .geo-bar {
+    top: 60px;
+    left: 8px;
+    right: 8px;
+    transform: none;
+    max-width: none;
+  }
+
+  .geo-search-wrap {
+    flex: 1;
+  }
+
+  .geo-tool-label {
+    display: none;
   }
 }
 

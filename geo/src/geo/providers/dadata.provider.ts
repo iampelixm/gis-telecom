@@ -18,7 +18,15 @@ interface DadataSuggestion {
     kladr_id?: string;
     geo_lat?: string;
     geo_lon?: string;
+    region_with_type?: string;
+    city_with_type?: string;
+    settlement_with_type?: string;
+    street_with_type?: string;
+    postal_code?: string;
+    qc_geo?: string;
     house?: {
+      house?: string;
+      type_full?: string;
       floors?: string;
       qty?: string;
     };
@@ -113,6 +121,8 @@ export class DadataProvider implements GeoProvider {
     if (!s) {
       return null;
     }
+    const houseNum = s.data?.house?.house;
+    const houseType = s.data?.house?.type_full;
     return {
       address: s.value,
       fiasId: s.data?.fias_id,
@@ -121,6 +131,14 @@ export class DadataProvider implements GeoProvider {
       lon: lon2 ?? lon,
       floors: s.data?.house?.floors ? Number(s.data.house.floors) : undefined,
       apartments: s.data?.house?.qty ? Number(s.data.house.qty) : undefined,
+      regionWithType: s.data?.region_with_type,
+      cityWithType: s.data?.city_with_type,
+      settlementWithType: s.data?.settlement_with_type,
+      streetWithType: s.data?.street_with_type,
+      houseFull:
+        houseNum && houseType ? `${houseType} ${houseNum}` : houseNum,
+      postalCode: s.data?.postal_code,
+      qcGeo: s.data?.qc_geo,
     };
   }
 

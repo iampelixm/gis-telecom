@@ -75,9 +75,9 @@
 
 | # | Задача | Статус | Примечание |
 |---|--------|--------|------------|
-| 6.1 | geo: каркас NestJS + JWT (общий JWT_SECRET) + /geo/health | ⬜ | |
-| 6.2 | geo: mock-эндпоинты (suggest/forward/reverse/company) | ⬜ | до ключей |
-| 6.3 | compose: сервис geo + Redis; nginx: /geo/* → geo | ⬜ | |
-| 6.4 | geo: кэш-логика (Redis), защита квоты Dadata | ⬜ | |
+| 6.1 | geo: каркас NestJS + JWT (общий JWT_SECRET) + /geo/health | ✅ | `geo/src/auth/*`, `/geo/health` без JWT |
+| 6.2 | geo: mock-эндпоинты (suggest/forward/reverse/company) | ✅ | `MockProvider`, заготовленные адреса Сочи |
+| 6.3 | compose: сервис geo + Redis; nginx: /geo/* → geo | ✅ | контейнеры dmap-geo/dmap-redis, `location /geo/` |
+| 6.4 | geo: кэш-логика (Redis), защита квоты Dadata | ✅ | TTL 7 дней, in-memory fallback, JWT-гвард на все эндпоинты кроме health |
 | 6.5 | geo: провайдер Dadata + проверка исходящего HTTPS | ⬜ | нужны ключи; уточнить поля этажей/квартир |
-| 6.6 | web: подсказки адресов, обратное геокодирование; расширение attrs_schema house | ⬜ | фаза 4 (формы) |
+| 6.6 | web: подсказки адресов, обратное геокодирование; расширение attrs_schema house | ✅ | автоподсказки address (suggest), «Определить адрес по точке» (reverse); миграция `1700000000005-house-geo-attrs` (fias_id, kladr_id, address_normalized, floors, apartments) |

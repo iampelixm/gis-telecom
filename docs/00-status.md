@@ -23,9 +23,9 @@ GIS-сервис для интернет-провайдера: веб-прило
 
 ## Сервисы (работают)
 
-`proxy`(:80) → `web`(:80), `admin`(:80), `api`(:3000), `mock-auth`(:3100); `db` PostGIS(:5432); `tiles` — Martin v1.14.0 (самосбор, MVT, :3200); geo + Redis — фаза 6.
+`proxy`(:80) → `web`(:80), `admin`(:80), `api`(:3000), `mock-auth`(:3100); `db` PostGIS(:5432); `tiles` — Martin v1.14.0 (самосбор, MVT, :3200); `geo`(NestJS, :3300) + `redis` — фаза 6, mock-режим до ключей Dadata.
 
-Маршруты через proxy: `/api/*` → api, `/mock-auth/*` → mock-auth, `/admin/` → admin (SPA администратора), `/tiles/objects/{z}/{x}/{y}` → tiles (JWT-фильтр, auth_request), `/` → web (карта инженера).
+Маршруты через proxy: `/api/*` → api, `/mock-auth/*` → mock-auth, `/geo/*` → geo, `/admin/` → admin (SPA администратора), `/tiles/objects/{z}/{x}/{y}` → tiles (JWT-фильтр, auth_request), `/` → web (карта инженера).
 
 Тестовые пользователи mock-auth: `admin` (всё + object-types:manage), `engineer` (read/write по всем объектам), `viewer` (только read).
 
@@ -48,12 +48,12 @@ Claims: `sub` (user), `name`, `role`, `permissions[]`. Подписан общи
 - Фаза 3 (RBAC): ✅ — 3.1 ✅ (`ObjectPermissionGuard` на `/objects`, `PermissionsGuard` на каталоге), 3.2 ✅ (видимость слоёв по правам в web и тайлах), 3.3 ✅ (mock-auth: admin/engineer/viewer)
 - Фаза 4 (редактирование и UX): ✅ — 4.1 ✅ (geoman: создание/перемещение/правка геометрии/удаление), 4.2 ✅ (динамические формы атрибутов по attrs_schema: text/number/integer/enum/checkbox/date/textarea), 4.3 ✅ (структурный редактор attrs_schema в admin: AttrsSchemaEditor.vue + режим сырого JSON), 4.4 ✅ (CRUD связей объектов: `/relations` + слой связей на карте, см. roadmap)
 - Фаза 5 (резервное копирование и полировка): частично — 5.1 бэкап ⬜ (план: Velero + restic + внешний S3, ежедневно, TTL 30 дней — docs/02-architecture/backup.md), 5.2 TLS ✅ (обеспечивает кластер summersite: Traefik + cert-manager), 5.3 аудит ✅ (журнал `change_log`: создание/изменение/перемещение/удаление объектов и связей + модалка «История» и хозяин объекта в web). OSM self-hosted вынесен в TODO (бэклог). Целевая среда проекта — кластер `summersite` (k3s).
-- Фаза 6 (geo + Dadata): запланирована, строится после фазы 4
+- Фаза 6 (geo + Dadata): ✅ (mock-режим) — сервис `geo` (NestJS, эндпоинты /geo/health|suggest|forward|reverse|company), Redis-кэш, JWT общим секретом, `/geo/` в nginx, контейнеры geo+redis в compose; в web — автоподсказки адреса в форме дома (suggest) + «Определить адрес по точке» (reverse), расширение `attrsSchema` типа `house` (fias_id, kladr_id, address_normalized, floors, apartments). Реальные ключи Dadata — после предоставления (`GEO_PROVIDER=dadata`).
 
 ## Ближайшие задачи (по порядку)
 
-1. Фаза 6: сервис `geo` (NestJS) + Redis + Dadata (mock-режим до ключей), подсказки адресов в web.
-2. UX-полировка web: адаптив под мобильные, список объектов, поиск, FAB.
+1. UX-полировка web: адаптив под мобильные, список объектов, поиск, FAB.
+2. Подключение Dadata: вставить ключи в .env, `GEO_PROVIDER=dadata`, сверить формат ответов.
 3. Развёртывание d_map в кластер `summersite` (k3s) и резервное копирование (Velero + restic + внешний S3, ежедневно, 30 дней — план: docs/02-architecture/backup.md).
 
 ## Полезные команды

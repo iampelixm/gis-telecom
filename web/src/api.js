@@ -1,5 +1,6 @@
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 const MOCK_AUTH_URL = import.meta.env.VITE_MOCK_AUTH_URL || '/mock-auth';
+const GEO_URL = import.meta.env.VITE_GEO_URL || '/geo';
 
 export class ApiError extends Error {
   status;
@@ -42,6 +43,32 @@ async function request(path, options = {}) {
   return res.json();
 }
 
+async function geoRequest(path, options = {}) {
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(options.headers || {}),
+  };
+  const t = token();
+  if (t) {
+    headers.Authorization = `Bearer ${t}`;
+  }
+
+  const res = await fetch(`${GEO_URL}${path}`, { ...options, headers });
+  if (!res.ok) {
+    let message = `HTTP ${res.status}`;
+    try {
+      const body = await res.json();
+      if (typeof body?.message === 'string') {
+        message = body.message;
+      }
+    } catch {
+      /* keep default message */
+    }
+    throw new ApiError(res.status, message);
+  }
+  return res.json();
+}
+
 function jsonBody(data) {
   return { body: JSON.stringify(data) };
 }
@@ -75,6 +102,17 @@ export const api = {
 
   history: (entityType, entityId) =>
     request(`/history?entityType=${entityType}&entityId=${entityId}`),
+
+  geo: {
+    suggest: (query) =>
+      geoRequest(`/suggest?query=${encodeURIComponent(query)}`),
+    forward: (address) =>
+      geoRequest(`/forward?address=${encodeURIComponent(address)}`),
+    reverse: (lat, lon) =>
+      geoRequest(`/reverse?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`),
+    company: (query) =>
+      geoRequest(`/company?query=${encodeURIComponent(query)}`),
+  },
 
   objects: {
     list: (query) => {

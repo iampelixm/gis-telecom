@@ -61,6 +61,14 @@ const historyModal = reactive({
   error: '',
 });
 
+const geoSuggest = reactive({
+  open: false,
+  results: [],
+  loading: false,
+  error: '',
+});
+let geoDebounce = null;
+
 const ACTION_LABELS = {
   created: 'Создание',
   updated: 'Изменение атрибутов',
@@ -142,14 +150,20 @@ function schemaFields(t) {
   const schema = t.attrsSchema || {};
   const props = schema.properties || {};
   const required = schema.required || [];
-  return Object.entries(props).map(([key, def]) => ({
-    key,
-    label: key.replace(/_/g, ' '),
-    type: def.type || 'string',
-    widget: fieldWidget(def),
-    enum: def.enum || null,
-    required: required.includes(key),
-  }));
+  return Object.entries(props).map(([key, def]) => {
+    let widget = fieldWidget(def);
+    if (t.code === 'house' && key === 'address' && def.type === 'string') {
+      widget = 'geo';
+    }
+    return {
+      key,
+      label: key.replace(/_/g, ' '),
+      type: def.type || 'string',
+      widget,
+      enum: def.enum || null,
+      required: required.includes(key),
+    };
+  });
 }
 
 async function loadCatalog() {
@@ -401,6 +415,7 @@ function openModal(mode, t, geometry, feature) {
   modal.fields = schemaFields(t);
   modal.values = {};
   modal.error = '';
+  closeGeo();
   for (const f of modal.fields) {
     if (f.widget === 'number') {
       modal.values[f.key] = 0;
@@ -609,6 +624,7 @@ function showObject(id, typeCode) {
         updatedAt: row.updatedAt,
       };
       modal.error = '';
+      closeGeo();
     })
     .catch((err) => {
       modal.mode = 'edit';
@@ -679,6 +695,96 @@ function closeModal() {
   modal.mode = null;
   modal.error = '';
   modal.owner = null;
+  closeGeo();
+}
+
+function isHouseModal() {
+  return modal.typeCode === 'house';
+}
+
+function isPointGeometry() {
+  return modal.geometry?.type === 'Point';
+}
+
+async function onAddressInput() {
+  const q = (modal.values.address || '').trim();
+  if (q.length < 3) {
+    geoSuggest.open = false;
+    geoSuggest.results = [];
+    return;
+  }
+  clearTimeout(geoDebounce);
+  geoSuggest.loading = true;
+  geoSuggest.error = '';
+  geoDebounce = setTimeout(async () => {
+    try {
+      const res = await api.geo.suggest(q);
+      geoSuggest.results = (res.suggestions || []).slice(0, 6);
+      geoSuggest.open = geoSuggest.results.length > 0;
+    } catch (err) {
+      geoSuggest.error = err?.message || String(err);
+      geoSuggest.open = false;
+      geoSuggest.results = [];
+    } finally {
+      geoSuggest.loading = false;
+    }
+  }, 300);
+}
+
+function pickAddress(s) {
+  modal.values.address = s.value;
+  if (s.fiasId) {
+    modal.values.fias_id = s.fiasId;
+  }
+  if (s.kladrId) {
+    modal.values.kladr_id = s.kladrId;
+  }
+  if (s.lat != null && s.lon != null) {
+    modal.values.address_normalized = s.value;
+  }
+  geoSuggest.open = false;
+  geoSuggest.results = [];
+}
+
+async function reverseGeocode() {
+  const g = modal.geometry;
+  if (!g || g.type !== 'Point') {
+    return;
+  }
+  const [lon, lat] = g.coordinates;
+  geoSuggest.loading = true;
+  geoSuggest.error = '';
+  try {
+    const r = await api.geo.reverse(lat, lon);
+    if (!r) {
+      geoSuggest.error = 'Не удалось определить адрес';
+      return;
+    }
+    modal.values.address = r.address;
+    if (r.fiasId) {
+      modal.values.fias_id = r.fiasId;
+    }
+    if (r.kladrId) {
+      modal.values.kladr_id = r.kladrId;
+    }
+    if (r.floors != null) {
+      modal.values.floors = r.floors;
+    }
+    if (r.apartments != null) {
+      modal.values.apartments = r.apartments;
+    }
+    modal.values.address_normalized = r.address;
+  } catch (err) {
+    geoSuggest.error = err?.message || String(err);
+  } finally {
+    geoSuggest.loading = false;
+  }
+}
+
+function closeGeo() {
+  clearTimeout(geoDebounce);
+  geoSuggest.open = false;
+  geoSuggest.results = [];
 }
 
 function showObjectGeometry() {
@@ -1010,6 +1116,23 @@ onBeforeUnmount(() => {
                 v-model="modal.values[f.key]"
               />
             </template>
+            <div v-else-if="f.widget === 'geo'" class="geo-wrap">
+              <input
+                v-model="modal.values[f.key]"
+                type="text"
+                autocomplete="off"
+                @input="onAddressInput"
+              />
+              <div v-if="geoSuggest.open" class="geo-suggest">
+                <button
+                  v-for="s in geoSuggest.results"
+                  :key="s.value"
+                  type="button"
+                  class="geo-item"
+                  @mousedown.prevent="pickAddress(s)"
+                >{{ s.value }}</button>
+              </div>
+            </div>
             <select
               v-else-if="f.widget === 'select'"
               v-model="modal.values[f.key]"
@@ -1027,6 +1150,19 @@ onBeforeUnmount(() => {
               :type="f.widget === 'date' ? 'date' : (f.widget === 'number' ? 'number' : 'text')"
             />
           </label>
+          <div
+            v-if="isHouseModal() && isPointGeometry()"
+            class="geo-tools"
+          >
+            <button
+              type="button"
+              class="secondary"
+              :disabled="geoSuggest.loading"
+              @click="reverseGeocode"
+            >Определить адрес по точке</button>
+            <span v-if="geoSuggest.loading" class="geo-loading">Поиск…</span>
+          </div>
+          <div v-if="geoSuggest.error" class="geo-error">{{ geoSuggest.error }}</div>
           <button
             type="submit"
             class="primary"
@@ -1045,6 +1181,23 @@ onBeforeUnmount(() => {
                 v-model="modal.values[f.key]"
               />
             </template>
+            <div v-else-if="f.widget === 'geo'" class="geo-wrap">
+              <input
+                v-model="modal.values[f.key]"
+                type="text"
+                autocomplete="off"
+                @input="onAddressInput"
+              />
+              <div v-if="geoSuggest.open" class="geo-suggest">
+                <button
+                  v-for="s in geoSuggest.results"
+                  :key="s.value"
+                  type="button"
+                  class="geo-item"
+                  @mousedown.prevent="pickAddress(s)"
+                >{{ s.value }}</button>
+              </div>
+            </div>
             <select
               v-else-if="f.widget === 'select'"
               v-model="modal.values[f.key]"
@@ -1062,6 +1215,19 @@ onBeforeUnmount(() => {
               :type="f.widget === 'date' ? 'date' : (f.widget === 'number' ? 'number' : 'text')"
             />
           </label>
+          <div
+            v-if="isHouseModal() && isPointGeometry()"
+            class="geo-tools"
+          >
+            <button
+              type="button"
+              class="secondary"
+              :disabled="geoSuggest.loading"
+              @click="reverseGeocode"
+            >Определить адрес по точке</button>
+            <span v-if="geoSuggest.loading" class="geo-loading">Поиск…</span>
+          </div>
+          <div v-if="geoSuggest.error" class="geo-error">{{ geoSuggest.error }}</div>
           <div v-if="modal.owner" class="owner-info">
             <div class="owner-row">
               <span>Создал:</span>
@@ -1490,6 +1656,75 @@ onBeforeUnmount(() => {
   align-self: flex-start;
   padding: 0;
   border: none;
+}
+
+.geo-wrap {
+  position: relative;
+}
+
+.geo-suggest {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.geo-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  color: #111827;
+  cursor: pointer;
+}
+
+.geo-item:hover {
+  background: #f3f4f6;
+}
+
+.geo-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.geo-loading {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.geo-error {
+  font-size: 12px;
+  color: #991b1b;
+}
+
+.secondary {
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.secondary:hover {
+  background: #f9fafb;
+}
+
+.secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .rel-info {

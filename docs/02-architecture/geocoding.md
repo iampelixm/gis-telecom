@@ -1,6 +1,6 @@
 # Геокодирование (geo + Dadata)
 
-Статус: принято (решения зафиксированы)
+Статус: реализовано (сервис `geo` в mock-режиме, Dadata — по получении ключей)
 Дата: 2026-08-30
 
 ## Решения
@@ -44,7 +44,29 @@ web → proxy(/geo/*) → geo(:3300)  → Dadata (ключи только на �
 
 - Redis: ключ по нормализованному запросу, значение — ответ Dadata.
 - Экономия платной квоты: повторные запросы не ходят в Dadata.
-- Политика TTL/инвалидации — определяется при реализации 6.4.
+- TTL 7 дней; при недоступном Redis — in-memory кэш в контейнере `geo` (с `GEO_PROVIDER=mock` Redis можно не поднимать).
+
+## Реализованные эндпоинты (NestJS, порт 3300, JWT тем же `JWT_SECRET`)
+
+| Метод | Путь | Назначение |
+|---|---|---|
+| GET | `/geo/health` | healthcheck (без JWT) |
+| GET | `/geo/suggest?query=…` | подсказки адресов (mock: предзаполненные адреса Сочи) |
+| GET | `/geo/forward?address=…` | адрес → координаты |
+| GET | `/geo/reverse?lat=..&lon=..` | координаты → адрес + данные дома (floors/apartments) |
+| GET | `/geo/company?query=…` | данные организаций (mock: 3 компании) |
+
+Структура ответов:
+
+- `suggest` / `company` → `{ suggestions: [...] }` с полями `value`, `fiasId`, `kladrId`, `lat`, `lon` / `name`, `inn`, `kpp`, `ogrn`, `address`.
+- `forward` → `{ address, fiasId, kladrId, lat, lon }`, 404 если не найден.
+- `reverse` → `{ address, fiasId, kladrId, lat, lon, floors, apartments }`, 404 если не найден.
+
+## Интеграция в web
+
+- `web/src/api.js`: `api.geo.suggest/forward/reverse/company` через `/geo/*` (прокси).
+- Форма дома (тип `house`): поле `address` — автоподсказки Dadata (suggest, дебаунс 300 мс, выбор заполняет fias_id/kladr_id), кнопка «Определить адрес по точке» (reverse по координатам точки → заполняет address/fias/kladr/floors/apartments).
+- `attrsSchema` типа `house` расширена полями `fias_id`, `kladr_id`, `address_normalized`, `floors`, `apartments` (миграция `1700000000005-house-geo-attrs`).
 
 ## Переключение провайдера
 
@@ -59,6 +81,6 @@ web → proxy(/geo/*) → geo(:3300)  → Dadata (ключи только на �
 
 ## Файлы/env
 
-- `.env`: `GEO_PROVIDER`, `DADATA_API_KEY`, `DADATA_SECRET`, `GEO_PORT`.
+- `.env`: `GEO_PROVIDER`, `DADATA_API_KEY`, `DADATA_SECRET`, `GEO_PORT`; `REDIS_HOST`/`REDIS_PORT` (для контейнера `geo` — из compose).
 - nginx: `location /geo/` → `geo`.
-- compose: сервисы `geo`, `redis`.
+- compose: сервисы `geo` (./geo), `redis` (redis:7-alpine).

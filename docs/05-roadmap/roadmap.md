@@ -41,18 +41,18 @@
 
 | # | Задача | Статус | Примечание |
 |---|--------|--------|------------|
-| 3.1 | Guard в api по динамическим permissions (objects/object-relations/types) | ⬜ | PermissionsGuard есть, подключить к эндпоинтам |
-| 3.2 | Видимость слоёв по правам (api + web) | ⬜ | |
+| 3.1 | Guard в api по динамическим permissions (objects/object-relations/types) | ✅ | `ObjectPermissionGuard` на всех эндпоинтах `/objects` (read/write по коду типа), `PermissionsGuard` + `object-types:manage` на мутациях каталога |
+| 3.2 | Видимость слоёв по правам (api + web) | ✅ | web скрывает чекбоксы и кнопки создания без прав (auth.js), тайлы фильтруются по `X-Object-Types` (ADR-002) |
 | 3.3 | mock-auth: набор пользователей с разными permissions | ✅ | admin/engineer/viewer, готово в фазе 1 |
 
 ## Фаза 4. Редактирование и UX
 
 | # | Задача | Статус | Примечание |
 |---|--------|--------|------------|
-| 4.1 | Инструменты рисования/редактирования на карте | ⬜ | **maplibre-gl-geoman** |
-| 4.2 | Динамические формы атрибутов по attrs_schema | ⬜ | |
-| 4.3 | Редактор attrs_schema в админке `admin` | ⬜ | |
-| 4.4 | CRUD связей объектов на карте | ⬜ | |
+| 4.1 | Инструменты рисования/редактирования на карте | ✅ | **maplibre-gl-geoman**: создание кликом, перемещение, правка геометрии, удаление; выбор объекта с приоритетом point > line > polygon; `--cache-expiry 5s` у Martin для быстрой инвалидации тайлов |
+| 4.2 | Динамические формы атрибутов по attrs_schema | 🟡 | есть базовые типы полей (text/number/integer/enum) из `attrsSchema` в web; расширить набор типов |
+| 4.3 | Редактор attrs_schema в админке `admin` | 🟡 | пока сырой JSON-textarea в форме типа (ObjectTypesView.vue); нужен структурный редактор |
+| 4.4 | CRUD связей объектов на карте | ⬜ | таблица `object_relations` в БД есть, эндпоинтов и UI нет |
 
 ## Фаза 5. Полировка и OSM self-hosted
 

@@ -7,6 +7,8 @@ import { Geoman } from '@geoman-io/maplibre-geoman-free';
 import '@geoman-io/maplibre-geoman-free/dist/maplibre-geoman.css';
 import { api } from '../api';
 import { auth } from '../auth';
+import ObjectsTable from './ObjectsTable.vue';
+import EquipmentTable from './EquipmentTable.vue';
 
 const mapContainer = ref(null);
 const layers = ref([]);
@@ -15,6 +17,7 @@ const visible = ref({});
 const relationTypes = ref([]);
 const relationVisible = ref({});
 const expandedLayers = reactive({});
+const layerCollapsed = reactive({});
 const layerObjects = reactive({});
 const layerObjectsLoading = reactive({});
 const layerObjectsError = reactive({});
@@ -23,6 +26,9 @@ const searchResults = ref([]);
 const searchLoading = ref(false);
 const fabOpen = ref(false);
 const panelOpen = ref(true);
+const tableMode = ref(false);
+const equipOpen = ref(false);
+const equipMode = ref('modal');
 let searchDebounce = null;
 
 const TILES_URL = import.meta.env.VITE_TILES_URL || '/tiles';
@@ -194,6 +200,16 @@ function toggleLayerList(g) {
   if (opening) {
     loadLayerObjects(g);
   } else {
+    layerObjects[code] = [];
+    layerObjectsError[code] = '';
+  }
+}
+
+function toggleLayerCollapse(g) {
+  const code = g.code;
+  layerCollapsed[code] = !layerCollapsed[code];
+  if (layerCollapsed[code]) {
+    expandedLayers[code] = false;
     layerObjects[code] = [];
     layerObjectsError[code] = '';
   }
@@ -500,7 +516,50 @@ function setRelationData(fc) {
 
 function onMoveEnd() {
   reloadRelations();
+  tableTick++;
 }
+
+let tableTick = 0;
+
+function openTable() {
+  tableMode.value = true;
+}
+
+function closeTable() {
+  tableMode.value = false;
+}
+
+function openEquipment() {
+  equipOpen.value = true;
+}
+
+function closeEquipment() {
+  equipOpen.value = false;
+}
+
+function focusFromTable(o) {
+  tableMode.value = false;
+  equipOpen.value = false;
+  focusObject(o);
+}
+
+function onEquipModeChange(m) {
+  equipMode.value = m;
+}
+
+const equipmentTypes = computed(() => {
+  const equipLayer = layers.value.find((l) => l.code === 'equipment');
+  if (!equipLayer) {
+    return types.value.filter((t) => t.code === 'equipment');
+  }
+  return types.value.filter((t) => t.layerId === equipLayer.id);
+});
+
+const bboxTick = computed(() => {
+  if (!map) return '';
+  const b = map.getBounds();
+  return `${b.getWest()},${b.getSouth()},${b.getEast()},${b.getNorth()}##${tableTick}`;
+});
 
 function relationTypeByCode(code) {
   return relationTypes.value.find((r) => r.code === code);
@@ -1166,7 +1225,22 @@ onBeforeUnmount(() => {
     <aside class="panel" :class="{ 'panel-hidden': !panelOpen }">
       <div class="panel-header">
         <strong>{{ user?.name || user?.sub }}</strong>
-        <button class="logout" @click="logout">Выйти</button>
+        <div class="panel-header-actions">
+          <button
+            v-if="equipmentTypes.length"
+            class="header-btn"
+            :class="{ active: equipOpen }"
+            :title="equipOpen ? 'Закрыть таблицу оборудования' : 'Таблица оборудования'"
+            @click="equipOpen ? closeEquipment() : openEquipment()"
+          >Оборудование</button>
+          <button
+            class="header-btn"
+            :class="{ active: tableMode }"
+            title="Таблица объектов в области обзора"
+            @click="tableMode ? closeTable() : openTable()"
+          >Таблица</button>
+          <button class="logout" @click="logout">Выйти</button>
+        </div>
       </div>
       <div class="panel-body">
         <div class="search-box">
@@ -1195,21 +1269,27 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </div>
-        <div
-          v-for="g in grouped"
-          :key="g.code"
-          class="layer-group"
-        >
-          <div class="layer-name">
+          <div
+            v-for="g in grouped"
+            :key="g.code"
+            class="layer-group"
+          >
+          <div
+            class="layer-name"
+            :class="{ collapsed: layerCollapsed[g.code] }"
+            @click="toggleLayerCollapse(g)"
+          >
+            <span class="collapse-caret">{{ layerCollapsed[g.code] ? '▸' : '▾' }}</span>
             <span class="dot" :style="{ background: g.color || '#888' }"></span>
             {{ g.name }}
             <button
-              v-if="auth.hasObjectRead(g.types[0].code)"
+              v-if="!layerCollapsed[g.code] && auth.hasObjectRead(g.types[0].code)"
               class="list-toggle"
               :title="expandedLayers[g.code] ? 'Свернуть список' : 'Показать объекты слоя'"
               @click.stop="toggleLayerList(g)"
             >{{ expandedLayers[g.code] ? '−' : '≡' }}</button>
           </div>
+          <template v-if="!layerCollapsed[g.code]">
           <div v-if="expandedLayers[g.code]" class="layer-list">
             <div v-if="layerObjectsLoading[g.code]" class="search-hint">Загрузка…</div>
             <div v-else-if="layerObjectsError[g.code]" class="search-hint search-error">{{ layerObjectsError[g.code] }}</div>
@@ -1250,6 +1330,7 @@ onBeforeUnmount(() => {
               @click.prevent="startCreate(t)"
             >+</button>
           </label>
+          </template>
         </div>
         <div v-if="relationTypes.length" class="layer-group">
           <div class="layer-name">
@@ -1320,6 +1401,25 @@ onBeforeUnmount(() => {
       </button>
     </div>
     <button class="fab" title="Добавить объект" @click="toggleFab">+</button>
+
+    <ObjectsTable
+      v-if="tableMode"
+      :open="tableMode"
+      :types="types"
+      :bbox="bboxTick"
+      @close="closeTable"
+      @focus="focusFromTable"
+    />
+
+    <EquipmentTable
+      v-if="equipOpen"
+      :open="equipOpen"
+      :types="equipmentTypes"
+      :mode="equipMode"
+      @close="closeEquipment"
+      @focus="focusFromTable"
+      @mode-change="onEquipModeChange"
+    />
 
     <div v-if="modal.mode" class="modal-overlay" @click.self="closeModal">
       <div class="modal">
@@ -1860,6 +1960,32 @@ onBeforeUnmount(() => {
   font-size: 14px;
 }
 
+.panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.header-btn {
+  border: 1px solid #4b5563;
+  background: transparent;
+  color: #e5e7eb;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.header-btn:hover {
+  background: #374151;
+}
+
+.header-btn.active {
+  background: #fff;
+  color: #111827;
+  border-color: #fff;
+}
+
 .logout {
   border: none;
   background: transparent;
@@ -1889,6 +2015,18 @@ onBeforeUnmount(() => {
   font-weight: 600;
   color: #111827;
   margin-bottom: 4px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.layer-name.collapsed {
+  margin-bottom: 8px;
+}
+
+.collapse-caret {
+  color: #9ca3af;
+  font-size: 10px;
+  flex: none;
 }
 
 .type-toggle {
@@ -2377,6 +2515,20 @@ button.danger:disabled {
   .search-box input {
     min-height: 44px;
     font-size: 16px;
+  }
+
+  .panel-header {
+    padding: 8px 12px;
+  }
+
+  .header-btn {
+    padding: 8px 10px;
+    min-height: 40px;
+  }
+
+  .panel-header-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
 }
 

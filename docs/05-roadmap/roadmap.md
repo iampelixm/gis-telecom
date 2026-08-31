@@ -68,6 +68,8 @@
 |---|--------|--------|------------|
 | T.1 | Self-hosted OSM ЮФО (tilemaker → .mbtiles → Martin) | ⬜ | map-basemap.md |
 | T.2 | Развёртывание d_map в кластер summersite (k3s) | ⬜ | целевая среда кластера; конвертация compose → Kubernetes-манифесты |
+| T.3 | Расхождение индексов change_log: сущность vs миграция | ⬜ | два `@Index('IDX_change_log_entity')` на разных колонках в `api/src/audit/entities/change-log.entity.ts`, а в БД — один составной `("entityType","entityId")` (миграция 0004); при `synchronize:false` не влияет на работу; заменить на составной `@Index` уровня класса |
+| T.4 | Обновить «Ближайшие задачи» в docs/00-status.md | ⬜ | пункт «Подключение Dadata» выполнен — переписать под актуальные задачи |
 
 ## Фаза 6. Геокодирование (geo + Dadata)
 

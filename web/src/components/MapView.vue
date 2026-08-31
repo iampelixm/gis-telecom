@@ -16,20 +16,22 @@ const types = ref([]);
 const visible = ref({});
 const relationTypes = ref([]);
 const relationVisible = ref({});
-const expandedLayers = reactive({});
 const layerCollapsed = reactive({});
-const layerObjects = reactive({});
-const layerObjectsLoading = reactive({});
-const layerObjectsError = reactive({});
-const searchQuery = ref('');
-const searchResults = ref([]);
-const searchLoading = ref(false);
+const legendOpen = ref(true);
+const viewportListOpen = ref(true);
+const viewportObjects = ref([]);
+const viewportLoading = ref(false);
+const viewportError = ref('');
+const viewportSearch = ref('');
 const fabOpen = ref(false);
 const panelOpen = ref(true);
+const panelDock = ref('left'); // 'left' | 'right' | 'float'
+const panelPos = reactive({ x: 10, y: 10 });
+const headerMenuOpen = ref(false);
+const panelEl = ref(null);
 const tableMode = ref(false);
 const equipOpen = ref(false);
 const equipMode = ref('modal');
-let searchDebounce = null;
 
 const TILES_URL = import.meta.env.VITE_TILES_URL || '/tiles';
 
@@ -167,87 +169,34 @@ function focusObject(o) {
   showObject(o.id, o.typeCode);
 }
 
-async function loadLayerObjects(g) {
-  const code = g.code;
+async function loadViewportObjects() {
   const bbox = currentBbox();
-  const codes = g.types
+  const codes = types.value
     .filter((t) => visible.value[t.code] && auth.hasObjectRead(t.code))
     .map((t) => t.code);
   if (!bbox || codes.length === 0) {
-    layerObjects[code] = [];
-    layerObjectsLoading[code] = false;
+    viewportObjects.value = [];
+    viewportLoading.value = false;
+    viewportError.value = '';
     return;
   }
-  layerObjectsLoading[code] = true;
-  layerObjectsError[code] = '';
+  viewportLoading.value = true;
+  viewportError.value = '';
   try {
     const results = await Promise.all(
       codes.map((c) => api.objects.list({ type: c, bbox, limit: 500 })),
     );
-    layerObjects[code] = results.flat().sort((a, b) => a.id - b.id);
+    viewportObjects.value = results.flat().sort((a, b) => a.id - b.id);
   } catch (err) {
-    layerObjectsError[code] = err?.message || String(err);
-    layerObjects[code] = [];
+    viewportError.value = err?.message || String(err);
+    viewportObjects.value = [];
   } finally {
-    layerObjectsLoading[code] = false;
-  }
-}
-
-function toggleLayerList(g) {
-  const code = g.code;
-  const opening = !expandedLayers[code];
-  expandedLayers[code] = opening;
-  if (opening) {
-    loadLayerObjects(g);
-  } else {
-    layerObjects[code] = [];
-    layerObjectsError[code] = '';
+    viewportLoading.value = false;
   }
 }
 
 function toggleLayerCollapse(g) {
-  const code = g.code;
-  layerCollapsed[code] = !layerCollapsed[code];
-  if (layerCollapsed[code]) {
-    expandedLayers[code] = false;
-    layerObjects[code] = [];
-    layerObjectsError[code] = '';
-  }
-}
-
-function onSearchInput() {
-  const q = searchQuery.value.trim();
-  clearTimeout(searchDebounce);
-  if (q.length < 2) {
-    searchResults.value = [];
-    searchLoading.value = false;
-    return;
-  }
-  searchLoading.value = true;
-  searchDebounce = setTimeout(async () => {
-    const readable = types.value.filter((t) => auth.hasObjectRead(t.code));
-    try {
-      const results = await Promise.all(
-        readable.map((t) =>
-          api.objects.list({ type: t.code, search: q, limit: 30 }),
-        ),
-      );
-      searchResults.value = results
-        .flat()
-        .sort((a, b) => a.id - b.id)
-        .slice(0, 30);
-    } catch (err) {
-      searchResults.value = [];
-    } finally {
-      searchLoading.value = false;
-    }
-  }, 300);
-}
-
-function pickSearchResult(o) {
-  searchResults.value = [];
-  searchQuery.value = '';
-  focusObject(o);
+  layerCollapsed[g.code] = !layerCollapsed[g.code];
 }
 
 function toggleFab() {
@@ -269,6 +218,19 @@ const grouped = computed(() =>
 );
 
 const user = computed(() => auth.state.user);
+
+const viewportFiltered = computed(() => {
+  const q = viewportSearch.value.trim().toLowerCase();
+  if (!q) return viewportObjects.value;
+  return viewportObjects.value.filter((o) => {
+    const typeName = typeByCode(o.typeCode)?.name || o.typeCode;
+    return (
+      String(o.id).includes(q) ||
+      objectLabel(o).toLowerCase().includes(q) ||
+      typeName.toLowerCase().includes(q)
+    );
+  });
+});
 
 const SHAPE_BY_GEOM = {
   point: 'marker',
@@ -358,6 +320,7 @@ async function loadCatalog() {
   addRelationLayers();
   initGeoman();
   map.on('moveend', onMoveEnd);
+  loadViewportObjects();
 }
 
 function addObjectLayers() {
@@ -431,6 +394,7 @@ function toggleType(t) {
       visible.value[t.code] ? 'visible' : 'none',
     );
   }
+  loadViewportObjects();
 }
 
 const RELATION_SOURCE = 'src-relations';
@@ -516,6 +480,7 @@ function setRelationData(fc) {
 
 function onMoveEnd() {
   reloadRelations();
+  loadViewportObjects();
   tableTick++;
 }
 
@@ -545,6 +510,60 @@ function focusFromTable(o) {
 
 function onEquipModeChange(m) {
   equipMode.value = m;
+}
+
+let dragState = null;
+
+function panelStyle() {
+  if (panelDock.value === 'float') {
+    return { left: `${panelPos.x}px`, top: `${panelPos.y}px` };
+  }
+  return {};
+}
+
+function startPanelDrag(e) {
+  if (e.button !== 0 || window.innerWidth <= 700) return;
+  if (e.target.closest('button, input, a, .panel-toggle')) return;
+  const panel = panelEl.value;
+  if (!panel) return;
+  const rect = panel.getBoundingClientRect();
+  dragState = {
+    startX: e.clientX,
+    startY: e.clientY,
+    x: rect.left,
+    y: rect.top,
+  };
+  panelDock.value = 'float';
+  panelPos.x = rect.left;
+  panelPos.y = rect.top;
+  window.addEventListener('mousemove', onPanelDragMove);
+  window.addEventListener('mouseup', onPanelDragEnd);
+}
+
+function onPanelDragMove(e) {
+  if (!dragState) return;
+  panelPos.x = dragState.x + (e.clientX - dragState.startX);
+  panelPos.y = dragState.y + (e.clientY - dragState.startY);
+}
+
+function onPanelDragEnd() {
+  if (!dragState) return;
+  window.removeEventListener('mousemove', onPanelDragMove);
+  window.removeEventListener('mouseup', onPanelDragEnd);
+  const vw = window.innerWidth;
+  const panel = panelEl.value;
+  const w = panel ? panel.offsetWidth : 240;
+  if (panelPos.x <= 24) {
+    panelDock.value = 'left';
+  } else if (panelPos.x + w >= vw - 24) {
+    panelDock.value = 'right';
+  }
+  dragState = null;
+}
+
+function dockPanel(side) {
+  panelDock.value = side;
+  headerMenuOpen.value = false;
 }
 
 const equipmentTypes = computed(() => {
@@ -1211,7 +1230,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="map-shell" :class="{ 'panel-open': panelOpen }">
+  <div class="map-shell" :class="{ 'panel-open': panelOpen }" @click="headerMenuOpen = false">
     <div ref="mapContainer" class="map"></div>
 
     <button
@@ -1222,143 +1241,167 @@ onBeforeUnmount(() => {
       {{ panelOpen ? '✕' : '≡' }}
     </button>
 
-    <aside class="panel" :class="{ 'panel-hidden': !panelOpen }">
-      <div class="panel-header">
-        <strong>{{ user?.name || user?.sub }}</strong>
+    <aside
+      ref="panelEl"
+      class="panel"
+      :class="['dock-' + panelDock, { 'panel-hidden': !panelOpen }]"
+      :style="panelStyle()"
+    >
+      <div class="panel-header" @mousedown="startPanelDrag">
+        <strong class="panel-title" :title="dragState ? '' : 'Перетащите панель или закрепите по краю'">
+          {{ user?.name || user?.sub }}
+        </strong>
         <div class="panel-header-actions">
-          <button
-            v-if="equipmentTypes.length"
-            class="header-btn"
-            :class="{ active: equipOpen }"
-            :title="equipOpen ? 'Закрыть таблицу оборудования' : 'Таблица оборудования'"
-            @click="equipOpen ? closeEquipment() : openEquipment()"
-          >Оборудование</button>
-          <button
-            class="header-btn"
-            :class="{ active: tableMode }"
-            title="Таблица объектов в области обзора"
-            @click="tableMode ? closeTable() : openTable()"
-          >Таблица</button>
-          <button class="logout" @click="logout">Выйти</button>
+          <div class="menu-wrap">
+            <button
+              class="header-btn burger"
+              title="Меню"
+              @click.stop="headerMenuOpen = !headerMenuOpen"
+            >{{ headerMenuOpen ? '✕' : '≡' }}</button>
+            <div v-if="headerMenuOpen" class="header-menu" @click.stop>
+              <button
+                v-if="equipmentTypes.length"
+                class="menu-item"
+                :class="{ active: equipOpen }"
+                @click="equipOpen ? closeEquipment() : openEquipment(); headerMenuOpen = false"
+              >Оборудование</button>
+              <button
+                class="menu-item"
+                :class="{ active: tableMode }"
+                @click="tableMode ? closeTable() : openTable(); headerMenuOpen = false"
+              >Таблица объектов</button>
+              <div class="menu-sep"></div>
+              <div class="menu-dock">
+                <span class="menu-dock-label">Панель</span>
+                <button class="menu-item dock-item" :class="{ active: panelDock === 'left' }" @click="dockPanel('left')">слева</button>
+                <button class="menu-item dock-item" :class="{ active: panelDock === 'right' }" @click="dockPanel('right')">справа</button>
+              </div>
+              <div class="menu-sep"></div>
+              <button class="menu-item logout" @click="logout">Выйти</button>
+            </div>
+          </div>
         </div>
       </div>
       <div class="panel-body">
-        <div class="search-box">
-          <input
-            v-model="searchQuery"
-            type="search"
-            placeholder="Поиск по объектам…"
-            autocomplete="off"
-            @input="onSearchInput"
-          />
-          <span v-if="searchLoading" class="search-hint">Поиск…</span>
-          <div v-else-if="searchQuery.trim().length >= 2 && searchResults.length === 0" class="search-hint">
-            Ничего не найдено
-          </div>
-          <div v-if="searchResults.length" class="search-results">
-            <button
-              v-for="o in searchResults"
-              :key="o.id"
-              class="search-item"
-              type="button"
-              @click="pickSearchResult(o)"
+        <div class="panel-section">
+          <button
+            class="section-header"
+            type="button"
+            :class="{ collapsed: !legendOpen }"
+            @click="legendOpen = !legendOpen"
+          >
+            <span class="collapse-caret">{{ legendOpen ? '▾' : '▸' }}</span>
+            Легенда
+            <span class="section-count">{{ grouped.length }}</span>
+          </button>
+          <template v-if="legendOpen">
+            <div
+              v-for="g in grouped"
+              :key="g.code"
+              class="layer-group"
             >
-              <span class="dot" :style="{ background: typeByCode(o.typeCode)?.color || '#888' }"></span>
-              <span class="search-type">{{ typeByCode(o.typeCode)?.name || o.typeCode }}</span>
-              <span class="search-label">{{ objectLabel(o) }}</span>
-            </button>
-          </div>
+              <div
+                class="layer-name"
+                :class="{ collapsed: layerCollapsed[g.code] }"
+                @click="toggleLayerCollapse(g)"
+              >
+                <span class="collapse-caret">{{ layerCollapsed[g.code] ? '▸' : '▾' }}</span>
+                <span class="dot" :style="{ background: g.color || '#888' }"></span>
+                {{ g.name }}
+              </div>
+              <template v-if="!layerCollapsed[g.code]">
+                <label
+                  v-for="t in g.types"
+                  :key="t.code"
+                  class="type-toggle"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="visible[t.code]"
+                    :disabled="!auth.hasObjectRead(t.code)"
+                    @change="toggleType(t)"
+                  />
+                  <span class="dot" :style="{ background: t.color || g.color || '#888' }"></span>
+                  {{ t.name }}
+                  <button
+                    v-if="auth.hasObjectWrite(t.code)"
+                    class="add-btn"
+                    :class="{ active: creatingType?.code === t.code }"
+                    :disabled="creatingType !== null"
+                    title="Добавить объект"
+                    @click.prevent="startCreate(t)"
+                  >+</button>
+                </label>
+              </template>
+            </div>
+            <div v-if="relationTypes.length" class="layer-group">
+              <div class="layer-name">
+                <span class="dot" :style="{ background: '#7c3aed' }"></span>
+                Связи
+                <button
+                  v-if="relationTypes.some((r) => auth.hasRelationWrite(r.code))"
+                  class="add-btn"
+                  :class="{ active: creatingRelation }"
+                  :disabled="creatingRelation"
+                  title="Добавить связь"
+                  @click="openRelationForm"
+                >+</button>
+              </div>
+              <label
+                v-for="r in relationTypes"
+                :key="r.code"
+                class="type-toggle"
+              >
+                <input
+                  type="checkbox"
+                  :checked="relationVisible[r.code]"
+                  :disabled="!auth.hasRelationRead(r.code)"
+                  @change="toggleRelation(r)"
+                />
+                <span class="dot" :style="{ background: relationColor(r) }"></span>
+                {{ r.name }}
+              </label>
+            </div>
+          </template>
         </div>
-          <div
-            v-for="g in grouped"
-            :key="g.code"
-            class="layer-group"
+
+        <div class="panel-section">
+          <button
+            class="section-header"
+            type="button"
+            :class="{ collapsed: !viewportListOpen }"
+            @click="viewportListOpen = !viewportListOpen"
           >
-          <div
-            class="layer-name"
-            :class="{ collapsed: layerCollapsed[g.code] }"
-            @click="toggleLayerCollapse(g)"
-          >
-            <span class="collapse-caret">{{ layerCollapsed[g.code] ? '▸' : '▾' }}</span>
-            <span class="dot" :style="{ background: g.color || '#888' }"></span>
-            {{ g.name }}
-            <button
-              v-if="!layerCollapsed[g.code] && auth.hasObjectRead(g.types[0].code)"
-              class="list-toggle"
-              :title="expandedLayers[g.code] ? 'Свернуть список' : 'Показать объекты слоя'"
-              @click.stop="toggleLayerList(g)"
-            >{{ expandedLayers[g.code] ? '−' : '≡' }}</button>
-          </div>
-          <template v-if="!layerCollapsed[g.code]">
-          <div v-if="expandedLayers[g.code]" class="layer-list">
-            <div v-if="layerObjectsLoading[g.code]" class="search-hint">Загрузка…</div>
-            <div v-else-if="layerObjectsError[g.code]" class="search-hint search-error">{{ layerObjectsError[g.code] }}</div>
-            <div v-else-if="!layerObjects[g.code]?.length" class="search-hint">
-              Нет объектов в видимой области
+            <span class="collapse-caret">{{ viewportListOpen ? '▾' : '▸' }}</span>
+            Объекты во вьюпорте
+            <span class="section-count">{{ viewportObjects.length }}</span>
+          </button>
+          <template v-if="viewportListOpen">
+            <div class="search-box">
+              <input
+                v-model="viewportSearch"
+                type="search"
+                placeholder="Фильтр по списку…"
+                autocomplete="off"
+              />
+            </div>
+            <div v-if="viewportLoading" class="search-hint">Загрузка…</div>
+            <div v-else-if="viewportError" class="search-hint search-error">{{ viewportError }}</div>
+            <div v-else-if="viewportFiltered.length === 0" class="search-hint">
+              {{ viewportObjects.length === 0 ? 'Нет объектов в видимой области' : 'Ничего не найдено' }}
             </div>
             <button
-              v-for="o in layerObjects[g.code] || []"
+              v-for="o in viewportFiltered"
               :key="o.id"
               class="search-item"
               type="button"
               @click="focusObject(o)"
             >
               <span class="dot" :style="{ background: typeByCode(o.typeCode)?.color || '#888' }"></span>
-              <span class="search-type">{{ typeByCode(o.typeCode)?.name }}</span>
+              <span class="search-type">{{ typeByCode(o.typeCode)?.name || o.typeCode }}</span>
               <span class="search-label">{{ objectLabel(o) }}</span>
             </button>
-          </div>
-          <label
-            v-for="t in g.types"
-            :key="t.code"
-            class="type-toggle"
-          >
-            <input
-              type="checkbox"
-              :checked="visible[t.code]"
-              :disabled="!auth.hasObjectRead(t.code)"
-              @change="toggleType(t)"
-            />
-            <span class="dot" :style="{ background: t.color || g.color || '#888' }"></span>
-            {{ t.name }}
-            <button
-              v-if="auth.hasObjectWrite(t.code)"
-              class="add-btn"
-              :class="{ active: creatingType?.code === t.code }"
-              :disabled="creatingType !== null"
-              title="Добавить объект"
-              @click.prevent="startCreate(t)"
-            >+</button>
-          </label>
           </template>
-        </div>
-        <div v-if="relationTypes.length" class="layer-group">
-          <div class="layer-name">
-            <span class="dot" :style="{ background: '#7c3aed' }"></span>
-            Связи
-            <button
-              v-if="relationTypes.some((r) => auth.hasRelationWrite(r.code))"
-              class="add-btn"
-              :class="{ active: creatingRelation }"
-              :disabled="creatingRelation"
-              title="Добавить связь"
-              @click="openRelationForm"
-            >+</button>
-          </div>
-          <label
-            v-for="r in relationTypes"
-            :key="r.code"
-            class="type-toggle"
-          >
-            <input
-              type="checkbox"
-              :checked="relationVisible[r.code]"
-              :disabled="!auth.hasRelationRead(r.code)"
-              @change="toggleRelation(r)"
-            />
-            <span class="dot" :style="{ background: relationColor(r) }"></span>
-            {{ r.name }}
-          </label>
         </div>
       </div>
       <div v-if="creatingRelation" class="draw-bar">
@@ -1802,6 +1845,41 @@ onBeforeUnmount(() => {
   overflow-y: auto;
 }
 
+.panel-section {
+  margin-bottom: 10px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 4px;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 700;
+  color: #111827;
+  cursor: pointer;
+  text-align: left;
+  border-bottom: 1px solid #e5e7eb;
+  margin-bottom: 6px;
+}
+
+.section-header:hover {
+  color: #374151;
+}
+
+.section-count {
+  margin-left: auto;
+  background: #f3f4f6;
+  color: #6b7280;
+  border-radius: 10px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
 .search-item {
   display: flex;
   align-items: center;
@@ -1835,40 +1913,6 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.list-toggle {
-  margin-left: auto;
-  width: 20px;
-  height: 20px;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: #6b7280;
-  font-size: 14px;
-  line-height: 1;
-  cursor: pointer;
-  flex: none;
-}
-
-.list-toggle:hover {
-  background: #e5e7eb;
-}
-
-.layer-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 2px 0 6px 16px;
-  max-height: 160px;
-  overflow-y: auto;
-}
-
-.layer-list .search-item {
-  border-bottom: none;
-  padding: 5px 7px;
-  border-radius: 4px;
-  font-size: 12px;
 }
 
 .fab {
@@ -1950,20 +1994,54 @@ onBeforeUnmount(() => {
   z-index: 1;
 }
 
+.panel.dock-left {
+  top: 10px;
+  left: 10px;
+}
+
+.panel.dock-right {
+  top: 10px;
+  left: auto;
+  right: 10px;
+}
+
+.panel.dock-float {
+  top: auto;
+  left: auto;
+}
+
 .panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 6px;
   padding: 10px 12px;
   background: #111827;
   color: #fff;
   font-size: 14px;
+  cursor: grab;
+  user-select: none;
+}
+
+.panel-header:active {
+  cursor: grabbing;
+}
+
+.panel-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .panel-header-actions {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
+}
+
+.menu-wrap {
+  position: relative;
 }
 
 .header-btn {
@@ -1986,6 +2064,68 @@ onBeforeUnmount(() => {
   border-color: #fff;
 }
 
+.header-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 180px;
+  background: #fff;
+  color: #111827;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  padding: 6px;
+  z-index: 50;
+}
+
+.menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: #111827;
+  padding: 8px 10px;
+  font-size: 13px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.menu-item:hover {
+  background: #f3f4f6;
+}
+
+.menu-item.active {
+  background: #eef2ff;
+  color: #3730a3;
+  font-weight: 600;
+}
+
+.menu-sep {
+  height: 1px;
+  background: #e5e7eb;
+  margin: 6px 4px;
+}
+
+.menu-dock {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+}
+
+.menu-dock-label {
+  font-size: 11px;
+  color: #6b7280;
+  margin-right: auto;
+}
+
+.dock-item {
+  padding: 5px 8px;
+  font-size: 12px;
+  width: auto;
+}
+
 .logout {
   border: none;
   background: transparent;
@@ -1996,6 +2136,15 @@ onBeforeUnmount(() => {
 
 .logout:hover {
   color: #fff;
+}
+
+.header-menu .logout {
+  color: #9ca3af;
+}
+
+.header-menu .logout:hover {
+  color: #111827;
+  background: #f3f4f6;
 }
 
 .panel-body {
@@ -2424,7 +2573,10 @@ button.danger:disabled {
     background: #4b5563;
   }
 
-  .panel {
+  .panel,
+  .panel.dock-left,
+  .panel.dock-right,
+  .panel.dock-float {
     top: auto;
     bottom: 0;
     left: 0;
@@ -2524,6 +2676,14 @@ button.danger:disabled {
   .header-btn {
     padding: 8px 10px;
     min-height: 40px;
+  }
+
+  .header-menu {
+    top: auto;
+    bottom: calc(100% + 6px);
+    right: 0;
+    max-height: 60vh;
+    overflow-y: auto;
   }
 
   .panel-header-actions {

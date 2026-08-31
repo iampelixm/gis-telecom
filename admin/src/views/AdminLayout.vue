@@ -11,6 +11,7 @@ const menuOptions = [
   { label: 'Слои', key: 'layers' },
   { label: 'Типы объектов', key: 'object-types' },
   { label: 'Типы связей', key: 'relation-types' },
+  { label: 'Трассы', key: 'routes' },
 ];
 
 const activeKey = ref(route.name as string);

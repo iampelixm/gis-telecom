@@ -64,10 +64,6 @@ async function save() {
     message.warning('Выберите типы «из» и «в»');
     return;
   }
-  if (form.value.fromTypeId === form.value.toTypeId) {
-    message.warning('Типы «из» и «в» не должны совпадать');
-    return;
-  }
   saving.value = true;
   try {
     if (editing.value) {

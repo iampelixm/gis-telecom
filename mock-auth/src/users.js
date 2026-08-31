@@ -30,6 +30,8 @@ export const users = [
       "object-relations:equipment_house:write",
       "object-relations:equipment_pole:read",
       "object-relations:equipment_pole:write",
+      "object-relations:route_route:read",
+      "object-relations:route_route:write",
     ],
   },
   {
@@ -43,6 +45,7 @@ export const users = [
       "objects:route:read",
       "objects:house:read",
       "objects:equipment:read",
+      "object-relations:route_route:read",
     ],
   },
 ];

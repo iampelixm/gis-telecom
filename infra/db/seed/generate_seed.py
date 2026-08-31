@@ -133,10 +133,73 @@ def main():
     total = len(routes) + len(poles) + len(splice_idx)
     print(f"TOTAL objects: {total}")
 
+    # Группировка трасс в цепочки по имени дороги (общая трасса = несколько сегментов).
+    groups = {}
+    for j, r in enumerate(routes):
+        groups.setdefault(r["name"] or "Трасса без названия", []).append(j)
+
+    def group_components(idxs):
+        remaining = set(idxs)
+        comps = []
+        while remaining:
+            seed = remaining.pop()
+            comp = {seed}
+            queue = [seed]
+            while queue:
+                a = queue.pop()
+                ac = routes[a]["coords"]
+                for b in list(remaining):
+                    bc = routes[b]["coords"]
+                    if min(dist(ac[0], bc[0]), dist(ac[0], bc[-1]), dist(ac[-1], bc[0]), dist(ac[-1], bc[-1])) < 50:
+                        remaining.remove(b)
+                        comp.add(b)
+                        queue.append(b)
+            comps.append(comp)
+        return comps
+
+    def build_path(comp):
+        comp = list(comp)
+        if len(comp) == 1:
+            return comp
+        used = {comp[0]}
+        path = [comp[0]]
+        cur_end = routes[comp[0]]["coords"][-1]
+        while len(path) < len(comp):
+            nxt = None
+            best_d = None
+            for m in comp:
+                if m in used:
+                    continue
+                c = routes[m]["coords"]
+                d = min(dist(cur_end, c[0]), dist(cur_end, c[-1]))
+                if best_d is None or d < best_d:
+                    best_d = d
+                    nxt = m
+            path.append(nxt)
+            used.add(nxt)
+            cur_end = routes[nxt]["coords"][-1]
+        return path
+
+    chains = []  # (имя, [индексы сегментов по порядку])
+    for name, idxs in groups.items():
+        for comp in group_components(idxs):
+            chains.append((name, build_path(comp)))
+
+    # Способ прокладки: внутри одной трассы чередуется underground/aerial.
+    lay_type = {}
+    for name, chain in chains:
+        multi = len(chain) > 1
+        for pos, ridx in enumerate(chain):
+            if multi:
+                lay_type[ridx] = "underground" if pos % 2 == 0 else "aerial"
+            else:
+                lay_type[ridx] = "aerial" if rng.random() < 0.5 else "underground"
+
     oid_route = db_query("SELECT id FROM object_types WHERE code='route'")
     oid_pole = db_query("SELECT id FROM object_types WHERE code='pole'")
     oid_splice = db_query("SELECT id FROM object_types WHERE code='splice'")
     rid_flp = db_query("SELECT id FROM relation_types WHERE code='fiber_line_pole'")
+    rid_rr = db_query("SELECT id FROM relation_types WHERE code='route_route'")
 
     def geo(coord):
         return f'ST_GeomFromGeoJSON(\'{{"type":"Point","coordinates":[{coord[0]:.7f},{coord[1]:.7f}]}}\')'
@@ -152,8 +215,8 @@ def main():
     sql.append("-- Трассы вдоль дорог")
     sql.append('INSERT INTO "objects" ("objectTypeId", geometry, attrs) VALUES')
     vals = []
-    for r in routes:
-        attrs = json.dumps({"laying_type": "aerial" if rng.random() < 0.5 else "underground", "name": r["name"]}, ensure_ascii=False)
+    for j, r in enumerate(routes):
+        attrs = json.dumps({"laying_type": lay_type[j], "name": r["name"]}, ensure_ascii=False)
         vals.append(f"  ({oid_route}, {line_geo(r)}, '{attrs}'::jsonb)")
     sql.append(",\n".join(vals) + ";")
     sql.append("")
@@ -187,11 +250,25 @@ def main():
             rel.append(f"  ({rid_flp}, {frm}, {to})")
             rel_count += 1
     sql.append(",\n".join(rel) + ";")
+    sql.append("")
+    sql.append("-- Связи route_route: цепочка сегментов одной трассы (сегмент → следующий сегмент)")
+    sql.append('INSERT INTO "object_relations" ("relationTypeId", "fromObjectId", "toObjectId") VALUES')
+    rr = []
+    rr_count = 0
+    multi = 0
+    for name, chain in chains:
+        if len(chain) < 2:
+            continue
+        multi += 1
+        for a, b in zip(chain, chain[1:]):
+            rr.append(f"  ({rid_rr}, {a + 1}, {b + 1})")
+            rr_count += 1
+    sql.append(",\n".join(rr) + ";")
     sql.append("COMMIT;")
 
     Path(args.output).write_text("\n".join(sql))
     print(f"saved: {args.output}")
-    print(f"relations: {rel_count}")
+    print(f"route groups: {multi}, relations: {rel_count}, route_route relations: {rr_count}")
 
 
 if __name__ == "__main__":

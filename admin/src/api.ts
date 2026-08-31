@@ -89,4 +89,24 @@ export const api = {
     remove: (id: number) =>
       request(`/catalog/relation-types/${id}`, { method: 'DELETE' }),
   },
+
+  objects: {
+    list: (params: { type: string; limit: number }) =>
+      request<import('./types').MapObject[]>(
+        `/objects?type=${encodeURIComponent(params.type)}&limit=${params.limit}`,
+      ),
+    update: (id: number, data: { attrs: Record<string, unknown> }) =>
+      request(`/objects/${id}`, { method: 'PATCH', ...jsonBody(data) }),
+  },
+
+  relations: {
+    list: (params: { type: string; limit: number }) =>
+      request<import('./types').RelationFeatureCollection>(
+        `/relations?type=${encodeURIComponent(params.type)}&limit=${params.limit}`,
+      ),
+    create: (data: { relationType: string; fromId: number; toId: number }) =>
+      request('/relations', { method: 'POST', ...jsonBody(data) }),
+    remove: (id: number) =>
+      request(`/relations/${id}`, { method: 'DELETE' }),
+  },
 };

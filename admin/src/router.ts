@@ -30,6 +30,11 @@ const router = createRouter({
           name: 'relation-types',
           component: () => import('./views/RelationTypesView.vue'),
         },
+        {
+          path: 'routes',
+          name: 'routes',
+          component: () => import('./views/RoutesView.vue'),
+        },
       ],
     },
     { path: '/:pathMatch(.*)*', redirect: '/' },

@@ -9,6 +9,7 @@ import { api } from '../api';
 import { auth } from '../auth';
 import ObjectsTable from './ObjectsTable.vue';
 import EquipmentTable from './EquipmentTable.vue';
+import FloatPanel from './FloatPanel.vue';
 
 const mapContainer = ref(null);
 const layers = ref([]);
@@ -32,6 +33,24 @@ const panelEl = ref(null);
 const tableMode = ref(false);
 const equipOpen = ref(false);
 const equipMode = ref('modal');
+
+const routeObjects = ref({});
+const routeRelations = ref([]);
+const routeGroups = ref([]);
+const groupBySegmentId = ref(new Map());
+const incomingBySegment = ref(new Map());
+const groupPanel = reactive({
+  open: false,
+  group: null,
+  name: '',
+  segEdits: {},
+  error: '',
+});
+const groupDock = ref('float');
+const groupPos = reactive({ x: 280, y: 10 });
+const groupOpen = ref(true);
+const attachMode = ref(null);
+const groupBusy = ref(false);
 
 const TILES_URL = import.meta.env.VITE_TILES_URL || '/tiles';
 
@@ -166,7 +185,320 @@ function flyToObject(o) {
 
 function focusObject(o) {
   flyToObject(o);
-  showObject(o.id, o.typeCode);
+  if (o.typeCode === 'route') {
+    openGroupPanel(o.id);
+  } else {
+    showObject(o.id, o.typeCode);
+  }
+}
+
+function routeType() {
+  return typeByCode('route');
+}
+
+function geometryEndpoint(geom, which) {
+  if (geom?.type !== 'LineString' || !geom.coordinates?.length) return null;
+  const c = geom.coordinates;
+  return which === 'end' ? c[c.length - 1] : c[0];
+}
+
+function makeGroup(chain) {
+  const first = routeObjects.value[chain[0]];
+  return {
+    id: chain[0],
+    name: first?.attrs?.name || 'Трасса без названия',
+    segmentIds: chain,
+    start: chain[0],
+    end: chain[chain.length - 1],
+  };
+}
+
+function computeRouteGroups() {
+  const out = new Map();
+  const inMap = new Map();
+  for (const e of routeRelations.value) {
+    if (!out.has(e.fromId)) out.set(e.fromId, []);
+    out.get(e.fromId).push(e);
+    if (!inMap.has(e.toId)) inMap.set(e.toId, []);
+    inMap.get(e.toId).push(e);
+  }
+  const visited = new Set();
+  const groups = [];
+  const walk = (start) => {
+    const chain = [start];
+    visited.add(start);
+    let cur = start;
+    let guard = 0;
+    while (guard < 1000000) {
+      const nexts = out.get(cur) || [];
+      const nxt = nexts[0];
+      if (!nxt || visited.has(nxt.toId)) break;
+      chain.push(nxt.toId);
+      visited.add(nxt.toId);
+      cur = nxt.toId;
+      guard += 1;
+    }
+    return chain;
+  };
+  const starts = [...out.keys()]
+    .filter((n) => !inMap.has(n))
+    .sort((a, b) => a - b);
+  for (const s of starts) {
+    if (visited.has(s)) continue;
+    groups.push(makeGroup(walk(s)));
+  }
+  for (const from of out.keys()) {
+    if (visited.has(from)) continue;
+    groups.push(makeGroup(walk(from)));
+  }
+  const bySeg = new Map();
+  for (const g of groups) {
+    for (const sid of g.segmentIds) bySeg.set(sid, g);
+  }
+  routeGroups.value = groups;
+  groupBySegmentId.value = bySeg;
+  incomingBySegment.value = inMap;
+}
+
+async function refreshRouteData() {
+  const rr = relationTypeByCode('route_route');
+  if (!auth.hasObjectRead('route')) {
+    routeObjects.value = {};
+    routeRelations.value = [];
+    computeRouteGroups();
+    return;
+  }
+  try {
+    const [objs, rels] = await Promise.all([
+      api.objects.list({ type: 'route', limit: 5000 }),
+      rr && auth.hasRelationRead('route_route')
+        ? api.relations.list({ type: 'route_route', limit: 5000 })
+        : Promise.resolve({ features: [] }),
+    ]);
+    const byId = {};
+    for (const o of objs) byId[o.id] = o;
+    routeObjects.value = byId;
+    routeRelations.value = (rels.features || []).map((f) => ({
+      id: Number(f.properties.id),
+      fromId: Number(f.properties.fromId),
+      toId: Number(f.properties.toId),
+    }));
+  } catch (err) {
+    console.error('failed to load route data', err);
+  }
+  computeRouteGroups();
+  if (groupPanel.open && groupPanel.group) {
+    const cur =
+      groupForSegment(groupPanel.group.start) ||
+      groupForSegment(groupPanel.group.end) ||
+      groupPanel.group;
+    openGroupPanel(cur.start);
+  }
+}
+
+function groupForSegment(segmentId) {
+  const id = Number(segmentId);
+  const g = groupBySegmentId.value.get(id);
+  if (g) return g;
+  const o = routeObjects.value[id];
+  if (!o) return null;
+  return {
+    id,
+    name: o.attrs?.name || 'Трасса без названия',
+    segmentIds: [id],
+    start: id,
+    end: id,
+  };
+}
+
+function setGroupHighlight(group) {
+  const src = 'src-group-highlight';
+  if (!map) return;
+  if (!map.getSource(src)) {
+    map.addSource(src, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    map.addLayer({
+      id: 'hl-group-line',
+      type: 'line',
+      source: src,
+      filter: ['==', ['get', 'kind'], 'line'],
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': '#f97316', 'line-width': 5, 'line-opacity': 0.9 },
+    });
+    map.addLayer({
+      id: 'hl-group-point',
+      type: 'circle',
+      source: src,
+      filter: ['==', ['get', 'kind'], 'point'],
+      paint: {
+        'circle-radius': 7,
+        'circle-color': ['match', ['get', 'role'], 'start', '#16a34a', 'end', '#dc2626', '#f97316'],
+        'circle-stroke-color': '#ffffff',
+        'circle-stroke-width': 2,
+      },
+    });
+  }
+  const features = [];
+  for (const sid of group.segmentIds) {
+    const o = routeObjects.value[sid];
+    if (!o?.geometry) continue;
+    features.push({
+      type: 'Feature',
+      geometry: o.geometry,
+      properties: { kind: 'line', groupId: group.id, segmentId: sid },
+    });
+  }
+  const sp = geometryEndpoint(routeObjects.value[group.start]?.geometry, 'start');
+  const ep = geometryEndpoint(routeObjects.value[group.end]?.geometry, 'end');
+  if (sp) {
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: sp },
+      properties: { kind: 'point', role: 'start' },
+    });
+  }
+  if (ep) {
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: ep },
+      properties: { kind: 'point', role: 'end' },
+    });
+  }
+  map.getSource(src).setData({ type: 'FeatureCollection', features });
+}
+
+function clearGroupHighlight() {
+  const src = 'src-group-highlight';
+  if (map?.getSource(src)) {
+    map.getSource(src).setData({ type: 'FeatureCollection', features: [] });
+  }
+}
+
+function openGroupPanel(segmentId) {
+  const g = groupForSegment(segmentId);
+  if (!g) return;
+  groupPanel.group = g;
+  groupPanel.name = g.name;
+  groupPanel.error = '';
+  const edits = {};
+  for (const sid of g.segmentIds) {
+    edits[sid] = { laying_type: routeObjects.value[sid]?.attrs?.laying_type || '' };
+  }
+  groupPanel.segEdits = edits;
+  groupPanel.open = true;
+  groupOpen.value = true;
+  attachMode.value = null;
+  setGroupHighlight(g);
+}
+
+function closeGroupPanel() {
+  groupPanel.open = false;
+  groupPanel.group = null;
+  attachMode.value = null;
+  groupPanel.error = '';
+  clearGroupHighlight();
+}
+
+async function saveGroup() {
+  const g = groupPanel.group;
+  if (!g) return;
+  groupBusy.value = true;
+  groupPanel.error = '';
+  try {
+    const groupName = (groupPanel.name || '').trim();
+    const patches = [];
+    for (const sid of g.segmentIds) {
+      const o = routeObjects.value[sid];
+      if (!o) continue;
+      const cur = o.attrs || {};
+      const attrs = {};
+      if (groupName !== (cur.name || '')) attrs.name = groupName;
+      const lt = groupPanel.segEdits[sid]?.laying_type;
+      if (lt && lt !== (cur.laying_type || '')) attrs.laying_type = lt;
+      if (Object.keys(attrs).length) patches.push({ id: sid, attrs });
+    }
+    for (const p of patches) {
+      await api.objects.update(p.id, { attrs: p.attrs });
+    }
+    await refreshRouteData();
+  } catch (err) {
+    groupPanel.error = err?.message || String(err);
+  } finally {
+    groupBusy.value = false;
+  }
+}
+
+function attachNextSegment() {
+  if (!groupPanel.group) return;
+  attachMode.value = groupPanel.group.id;
+  groupPanel.error = '';
+}
+
+async function attachSegment(sid) {
+  const g = groupPanel.group;
+  if (!g) return;
+  const end = g.segmentIds[g.segmentIds.length - 1];
+  if (Number(sid) === Number(end)) {
+    groupPanel.error = 'Этот сегмент уже последний в трассе';
+    return;
+  }
+  if ((incomingBySegment.value.get(Number(sid)) || []).length) {
+    groupPanel.error = `Сегмент #${sid} уже имеет предыдущий сегмент`;
+    return;
+  }
+  groupBusy.value = true;
+  groupPanel.error = '';
+  try {
+    await api.relations.create({
+      relationType: 'route_route',
+      fromId: Number(end),
+      toId: Number(sid),
+    });
+    attachMode.value = null;
+    await refreshRouteData();
+  } catch (err) {
+    groupPanel.error = err?.message || String(err);
+  } finally {
+    groupBusy.value = false;
+  }
+}
+
+async function detachSegment(sid) {
+  const incoming = incomingBySegment.value.get(Number(sid)) || [];
+  if (!incoming.length) {
+    groupPanel.error = 'Сегмент — начало трассы, отсоединять нечего';
+    return;
+  }
+  if (!window.confirm(`Отсоединить сегмент #${sid} от трассы?`)) return;
+  groupBusy.value = true;
+  groupPanel.error = '';
+  try {
+    for (const e of incoming) await api.relations.remove(e.id);
+    await refreshRouteData();
+  } catch (err) {
+    groupPanel.error = err?.message || String(err);
+  } finally {
+    groupBusy.value = false;
+  }
+}
+
+async function ungroupGroup() {
+  const g = groupPanel.group;
+  if (!g || g.segmentIds.length < 2) return;
+  if (!window.confirm('Разгруппировать трассу? Сегменты станут независимыми.')) return;
+  groupBusy.value = true;
+  groupPanel.error = '';
+  try {
+    const ids = new Set();
+    for (const sid of g.segmentIds) {
+      for (const e of incomingBySegment.value.get(sid) || []) ids.add(e.id);
+    }
+    for (const id of ids) await api.relations.remove(id);
+    await refreshRouteData();
+  } catch (err) {
+    groupPanel.error = err?.message || String(err);
+  } finally {
+    groupBusy.value = false;
+  }
 }
 
 async function loadViewportObjects() {
@@ -219,6 +551,10 @@ const grouped = computed(() =>
 
 const user = computed(() => auth.state.user);
 
+const canEditGroup = computed(
+  () => auth.hasObjectWrite('route') && auth.hasRelationWrite('route_route'),
+);
+
 const viewportFiltered = computed(() => {
   const q = viewportSearch.value.trim().toLowerCase();
   if (!q) return viewportObjects.value;
@@ -230,6 +566,32 @@ const viewportFiltered = computed(() => {
       typeName.toLowerCase().includes(q)
     );
   });
+});
+
+const viewportGrouped = computed(() => {
+  const entries = [];
+  const routeById = new Map();
+  for (const o of viewportFiltered.value) {
+    if (o.typeCode === 'route') {
+      routeById.set(o.id, o);
+    } else {
+      entries.push({ kind: 'object', o });
+    }
+  }
+  for (const g of routeGroups.value) {
+    const present = g.segmentIds.filter((sid) => routeById.has(sid));
+    if (!present.length) continue;
+    entries.push({ kind: 'group', group: g });
+    for (const sid of present) {
+      entries.push({ kind: 'segment', o: routeById.get(sid) });
+    }
+  }
+  for (const o of routeById.values()) {
+    if (!groupBySegmentId.value.has(o.id)) {
+      entries.push({ kind: 'segment', o });
+    }
+  }
+  return entries;
 });
 
 const SHAPE_BY_GEOM = {
@@ -320,6 +682,7 @@ async function loadCatalog() {
   addRelationLayers();
   initGeoman();
   map.on('moveend', onMoveEnd);
+  refreshRouteData();
   loadViewportObjects();
 }
 
@@ -454,21 +817,35 @@ async function reloadRelations() {
   if (!map) {
     return;
   }
-  const codes = relationTypes.value
-    .filter((r) => relationVisible.value[r.code] && auth.hasRelationRead(r.code))
-    .map((r) => r.code);
-  if (codes.length === 0) {
-    setRelationData({ type: 'FeatureCollection', features: [] });
-    return;
-  }
   const b = map.getBounds();
   const bbox = `${b.getWest()},${b.getSouth()},${b.getEast()},${b.getNorth()}`;
-  try {
-    const fc = await api.relations.list({ type: codes.join(','), bbox });
-    setRelationData(fc);
-  } catch (err) {
-    console.error('failed to load relations', err);
+  const fc = { type: 'FeatureCollection', features: [] };
+  const codes = relationTypes.value
+    .filter(
+      (r) =>
+        r.code !== 'route_route' &&
+        relationVisible.value[r.code] &&
+        auth.hasRelationRead(r.code),
+    )
+    .map((r) => r.code);
+  if (codes.length) {
+    try {
+      const res = await api.relations.list({ type: codes.join(','), bbox });
+      fc.features.push(...(res.features || []));
+    } catch (err) {
+      console.error('failed to load relations', err);
+    }
   }
+  const rr = relationTypeByCode('route_route');
+  if (rr && relationVisible.value['route_route'] && auth.hasRelationRead('route_route')) {
+    try {
+      const res = await api.relations.list({ type: 'route_route', limit: 5000 });
+      fc.features.push(...(res.features || []));
+    } catch (err) {
+      console.error('failed to load route_route relations', err);
+    }
+  }
+  setRelationData(fc);
 }
 
 function setRelationData(fc) {
@@ -670,6 +1047,7 @@ function cleanupCreated() {
   creatingType.value = null;
   modal.mode = null;
   recreateObjectSource();
+  refreshRouteData();
 }
 
 async function submitCreate() {
@@ -742,6 +1120,7 @@ async function removeEditingObject() {
   try {
     await api.objects.remove(id);
     finishEditing();
+    refreshRouteData();
   } catch (err) {
     console.error('failed to delete object', err);
   }
@@ -749,6 +1128,27 @@ async function removeEditingObject() {
 
 async function onMapClick(e) {
   if (creatingType.value || editingObjectId.value !== null || !gm?.loaded) {
+    return;
+  }
+  if (attachMode.value !== null) {
+    const rt = routeType();
+    if (!rt) {
+      attachMode.value = null;
+      return;
+    }
+    const feats = map.queryRenderedFeatures(
+      [
+        [e.point.x - 6, e.point.y - 6],
+        [e.point.x + 6, e.point.y + 6],
+      ],
+      { layers: [layerForType(rt)] },
+    );
+    if (feats.length) {
+      await attachSegment(Number(feats[0].properties?.id));
+    } else {
+      attachMode.value = null;
+      groupPanel.error = '';
+    }
     return;
   }
   const relLayerIds = relationTypes.value
@@ -766,7 +1166,7 @@ async function onMapClick(e) {
     return;
   }
   const ids = types.value
-    .filter((t) => auth.hasObjectWrite(t.code) && auth.hasObjectRead(t.code))
+    .filter((t) => auth.hasObjectRead(t.code))
     .map((t) => layerForType(t));
   const r = 4;
   const feats = map.queryRenderedFeatures(
@@ -777,6 +1177,8 @@ async function onMapClick(e) {
     { layers: ids },
   );
   if (!feats.length) {
+    selected.value = null;
+    closeGroupPanel();
     return;
   }
   const PRIORITY = { point: 0, multipoint: 0, linestring: 1, multilinestring: 1, polygon: 2, multipolygon: 2 };
@@ -796,7 +1198,12 @@ async function onMapClick(e) {
   if (id == null || !typeCode) {
     return;
   }
-  await editObject(Number(id), typeCode);
+  selected.value = { id: Number(id), typeCode };
+  if (typeCode === 'route') {
+    openGroupPanel(Number(id));
+  } else {
+    showObject(Number(id), typeCode);
+  }
 }
 
 async function editObject(id, typeCode) {
@@ -870,6 +1277,7 @@ async function submitAttrs() {
     await api.objects.update(modal.objectId, { attrs: modal.values });
     modal.mode = null;
     recreateObjectSource();
+    refreshRouteData();
   } catch (err) {
     modal.error = err?.message || String(err);
   } finally {
@@ -889,6 +1297,7 @@ async function removeObject() {
     await api.objects.remove(modal.objectId);
     modal.mode = null;
     recreateObjectSource();
+    refreshRouteData();
   } catch (err) {
     modal.error = err?.message || String(err);
   } finally {
@@ -1094,6 +1503,7 @@ async function submitRelationForm() {
     });
     creatingRelation.value = false;
     reloadRelations();
+    refreshRouteData();
   } catch (err) {
     relForm.error = err?.message || String(err);
   }
@@ -1164,6 +1574,7 @@ async function removeRelation() {
     await api.relations.remove(relModal.relation.id);
     closeRelationModal();
     reloadRelations();
+    refreshRouteData();
   } catch (err) {
     relModal.error = err?.message || String(err);
   } finally {
@@ -1390,17 +1801,32 @@ onBeforeUnmount(() => {
             <div v-else-if="viewportFiltered.length === 0" class="search-hint">
               {{ viewportObjects.length === 0 ? 'Нет объектов в видимой области' : 'Ничего не найдено' }}
             </div>
-            <button
-              v-for="o in viewportFiltered"
-              :key="o.id"
-              class="search-item"
-              type="button"
-              @click="focusObject(o)"
+            <template
+              v-for="entry in viewportGrouped"
+              :key="entry.kind === 'group' ? 'g-' + entry.group.id : 'o-' + entry.o.id"
             >
-              <span class="dot" :style="{ background: typeByCode(o.typeCode)?.color || '#888' }"></span>
-              <span class="search-type">{{ typeByCode(o.typeCode)?.name || o.typeCode }}</span>
-              <span class="search-label">{{ objectLabel(o) }}</span>
-            </button>
+              <button
+                v-if="entry.kind === 'group'"
+                class="viewport-group-head"
+                type="button"
+                @click="openGroupPanel(entry.group.start)"
+              >
+                <span class="dot" :style="{ background: routeType()?.color || '#b26a00' }"></span>
+                <strong class="viewport-group-name">Трасса: {{ entry.group.name }}</strong>
+                <span class="search-type">{{ entry.group.segmentIds.length }}</span>
+              </button>
+              <button
+                v-else
+                class="search-item"
+                type="button"
+                @click="focusObject(entry.o)"
+              >
+                <span class="dot" :style="{ background: typeByCode(entry.o.typeCode)?.color || '#888' }"></span>
+                <span class="search-type">{{ typeByCode(entry.o.typeCode)?.name || entry.o.typeCode }}</span>
+                <span class="search-label">{{ objectLabel(entry.o) }}</span>
+                <span v-if="entry.o.typeCode === 'route' && entry.o.attrs?.laying_type" class="search-lt">{{ entry.o.attrs.laying_type }}</span>
+              </button>
+            </template>
           </template>
         </div>
       </div>
@@ -1422,6 +1848,80 @@ onBeforeUnmount(() => {
         >Удалить</button>
       </div>
     </aside>
+
+    <FloatPanel
+      v-if="groupPanel.open"
+      :open="groupOpen"
+      :dock="groupDock"
+      :pos="groupPos"
+      :title="'Трасса: ' + (groupPanel.group?.name || '')"
+      :width="320"
+      closable
+      @update:dock="groupDock = $event"
+      @update:pos="Object.assign(groupPos, $event)"
+      @update:open="groupOpen = $event"
+      @close="closeGroupPanel"
+    >
+      <div class="group-panel-body">
+        <div v-if="groupPanel.error" class="modal-error">{{ groupPanel.error }}</div>
+        <label class="field">
+          <span class="field-label">Название трассы</span>
+          <input v-model="groupPanel.name" type="text" :disabled="!canEditGroup" />
+        </label>
+        <div class="group-meta">
+          <div>Начало: сегмент #{{ groupPanel.group?.start }}</div>
+          <div>Конец: сегмент #{{ groupPanel.group?.end }}</div>
+          <div>Сегментов: {{ groupPanel.group?.segmentIds.length }}</div>
+        </div>
+        <div class="group-seg-list">
+          <div
+            v-for="(sid, i) in groupPanel.group?.segmentIds || []"
+            :key="sid"
+            class="group-seg"
+          >
+            <span class="group-seg-id">#{{ sid }}</span>
+            <select v-model="groupPanel.segEdits[sid].laying_type" :disabled="!canEditGroup">
+              <option value="">—</option>
+              <option value="underground">underground</option>
+              <option value="aerial">aerial</option>
+            </select>
+            <button
+              v-if="i > 0 && canEditGroup"
+              class="secondary group-detach"
+              :disabled="groupBusy"
+              @click="detachSegment(sid)"
+            >Отсоединить</button>
+          </div>
+        </div>
+        <div class="group-actions">
+          <button
+            v-if="canEditGroup"
+            class="primary"
+            :disabled="groupBusy"
+            @click="saveGroup"
+          >Сохранить</button>
+          <button class="secondary" :disabled="groupBusy" @click="closeGroupPanel">Отмена</button>
+          <button
+            v-if="canEditGroup"
+            class="secondary"
+            :disabled="groupBusy"
+            @click="attachNextSegment"
+          >{{ attachMode ? 'Выбор…' : 'Присоединить сегмент' }}</button>
+          <button
+            v-if="canEditGroup"
+            class="danger"
+            :disabled="groupBusy || (groupPanel.group?.segmentIds.length || 0) < 2"
+            @click="ungroupGroup"
+          >Разгруппировать</button>
+        </div>
+      </div>
+      <template v-if="attachMode" #footer>
+        <div class="attach-bar">
+          <span>Кликните на следующий сегмент трассы на карте</span>
+          <button @click="attachMode = null">Отмена</button>
+        </div>
+      </template>
+    </FloatPanel>
 
     <div v-if="fabOpen" class="fab-menu">
       <div class="fab-title">Добавить</div>
@@ -1613,6 +2113,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="modal-actions">
             <button
+              v-if="auth.hasObjectWrite(modal.typeCode)"
               class="primary"
               :disabled="saving"
               @click="submitAttrs"
@@ -1620,6 +2121,7 @@ onBeforeUnmount(() => {
               {{ saving ? 'Сохранение…' : 'Сохранить' }}
             </button>
             <button
+              v-if="auth.hasObjectWrite(modal.typeCode)"
               class="danger"
               :disabled="saving"
               @click="removeObject"
@@ -1627,6 +2129,7 @@ onBeforeUnmount(() => {
               Удалить
             </button>
             <button
+              v-if="auth.hasObjectWrite(modal.typeCode)"
               class="primary"
               :disabled="saving || editingObjectId !== null"
               @click="showObjectGeometry"
@@ -2690,6 +3193,128 @@ button.danger:disabled {
     flex-wrap: wrap;
     justify-content: flex-end;
   }
+}
+
+.viewport-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  padding: 6px 9px;
+  border: none;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 12px;
+  cursor: pointer;
+  border-top: 1px solid #fed7aa;
+  border-bottom: 1px solid #fed7aa;
+  margin-top: 2px;
+}
+
+.viewport-group-head:hover {
+  background: #ffedd5;
+}
+
+.viewport-group-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-lt {
+  flex: none;
+  background: #f3f4f6;
+  color: #6b7280;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+}
+
+.group-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+
+.group-meta {
+  font-size: 12px;
+  color: #374151;
+  background: #f3f4f6;
+  border-radius: 6px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.group-seg-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.group-seg {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.group-seg-id {
+  flex: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  min-width: 46px;
+}
+
+.group-seg select {
+  flex: 1;
+  padding: 5px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.group-detach {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.group-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.group-actions button {
+  flex: 1 1 auto;
+}
+
+.attach-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #fef3c7;
+  border-top: 1px solid #fde68a;
+  font-size: 12px;
+  color: #92400e;
+}
+
+.attach-bar button {
+  border: none;
+  background: #92400e;
+  color: #fff;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  flex: none;
 }
 
 </style>

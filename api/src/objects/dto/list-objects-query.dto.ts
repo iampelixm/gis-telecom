@@ -23,4 +23,8 @@ export class ListObjectsQuery {
   @IsInt()
   @Min(0)
   offset?: number;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
 }

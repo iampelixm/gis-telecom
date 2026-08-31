@@ -49,12 +49,12 @@ Claims: `sub` (user), `name`, `role`, `permissions[]`. Подписан общи
 - Фаза 4 (редактирование и UX): ✅ — 4.1 ✅ (geoman: создание/перемещение/правка геометрии/удаление), 4.2 ✅ (динамические формы атрибутов по attrs_schema: text/number/integer/enum/checkbox/date/textarea), 4.3 ✅ (структурный редактор attrs_schema в admin: AttrsSchemaEditor.vue + режим сырого JSON), 4.4 ✅ (CRUD связей объектов: `/relations` + слой связей на карте, см. roadmap)
 - Фаза 5 (резервное копирование и полировка): частично — 5.1 бэкап ⬜ (план: Velero + restic + внешний S3, ежедневно, TTL 30 дней — docs/02-architecture/backup.md), 5.2 TLS ✅ (обеспечивает кластер summersite: Traefik + cert-manager), 5.3 аудит ✅ (журнал `change_log`: создание/изменение/перемещение/удаление объектов и связей + модалка «История» и хозяин объекта в web). OSM self-hosted вынесен в TODO (бэклог). Целевая среда проекта — кластер `summersite` (k3s).
 - Фаза 6 (geo + Dadata): ✅ (mock-режим) — сервис `geo` (NestJS, эндпоинты /geo/health|suggest|forward|reverse|company), Redis-кэш, JWT общим секретом, `/geo/` в nginx, контейнеры geo+redis в compose; в web — автоподсказки адреса в форме дома (suggest) + «Определить адрес по точке» (reverse), расширение `attrsSchema` типа `house` (fias_id, kladr_id, address_normalized, floors, apartments). Реальные ключи Dadata — после предоставления (`GEO_PROVIDER=dadata`).
+- Фаза 7 (UX-полировка и мобильные): ✅ — поиск по объектам (`GET /objects?search=` + поле поиска в панели web), список объектов слоя в текущем bbox (кнопка «≡»), FAB «+» для быстрого добавления, адаптив: панель → bottom-sheet, модалки на весь экран, тач-таргеты ≥44px.
 
 ## Ближайшие задачи (по порядку)
 
-1. UX-полировка web: адаптив под мобильные, список объектов, поиск, FAB.
-2. Подключение Dadata: вставить ключи в .env, `GEO_PROVIDER=dadata`, сверить формат ответов.
-3. Развёртывание d_map в кластер `summersite` (k3s) и резервное копирование (Velero + restic + внешний S3, ежедневно, 30 дней — план: docs/02-architecture/backup.md).
+1. Подключение Dadata: вставить ключи в .env, `GEO_PROVIDER=dadata`, сверить формат ответов.
+2. Развёртывание d_map в кластер `summersite` (k3s) и резервное копирование (Velero + restic + внешний S3, ежедневно, 30 дней — план: docs/02-architecture/backup.md).
 
 ## Полезные команды
 

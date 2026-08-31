@@ -14,6 +14,16 @@ const types = ref([]);
 const visible = ref({});
 const relationTypes = ref([]);
 const relationVisible = ref({});
+const expandedLayers = reactive({});
+const layerObjects = reactive({});
+const layerObjectsLoading = reactive({});
+const layerObjectsError = reactive({});
+const searchQuery = ref('');
+const searchResults = ref([]);
+const searchLoading = ref(false);
+const fabOpen = ref(false);
+const panelOpen = ref(true);
+let searchDebounce = null;
 
 const TILES_URL = import.meta.env.VITE_TILES_URL || '/tiles';
 
@@ -93,6 +103,144 @@ function fmtValue(v) {
   if (v === null || v === undefined || v === '') return '—';
   if (typeof v === 'object') return JSON.stringify(v);
   return String(v);
+}
+
+function objectLabel(o) {
+  const a = o.attrs || {};
+  const main =
+    a.inventory_number ||
+    a.address ||
+    a.name ||
+    a.title ||
+    a.device_type ||
+    a.phone ||
+    a.full_name ||
+    '';
+  const base = typeof main === 'string' ? main : JSON.stringify(main);
+  return `${base} (#${o.id})`;
+}
+
+function geometryCenter(geom) {
+  if (!geom) return null;
+  if (geom.type === 'Point') {
+    return geom.coordinates.slice(0, 2);
+  }
+  const coords = [];
+  const collect = (c) => {
+    if (Array.isArray(c[0])) {
+      c.forEach(collect);
+    } else {
+      coords.push(c);
+    }
+  };
+  collect(geom.coordinates || []);
+  if (!coords.length) return null;
+  const xs = coords.map((c) => c[0]);
+  const ys = coords.map((c) => c[1]);
+  return [
+    (Math.min(...xs) + Math.max(...xs)) / 2,
+    (Math.min(...ys) + Math.max(...ys)) / 2,
+  ];
+}
+
+function currentBbox() {
+  if (!map) return null;
+  const b = map.getBounds();
+  return `${b.getWest()},${b.getSouth()},${b.getEast()},${b.getNorth()}`;
+}
+
+function flyToObject(o) {
+  const center = geometryCenter(o.geometry);
+  if (center) {
+    map.flyTo({ center, zoom: Math.max(map.getZoom(), 16) });
+  }
+}
+
+function focusObject(o) {
+  flyToObject(o);
+  showObject(o.id, o.typeCode);
+}
+
+async function loadLayerObjects(g) {
+  const code = g.code;
+  const bbox = currentBbox();
+  const codes = g.types
+    .filter((t) => visible.value[t.code] && auth.hasObjectRead(t.code))
+    .map((t) => t.code);
+  if (!bbox || codes.length === 0) {
+    layerObjects[code] = [];
+    layerObjectsLoading[code] = false;
+    return;
+  }
+  layerObjectsLoading[code] = true;
+  layerObjectsError[code] = '';
+  try {
+    const results = await Promise.all(
+      codes.map((c) => api.objects.list({ type: c, bbox, limit: 500 })),
+    );
+    layerObjects[code] = results.flat().sort((a, b) => a.id - b.id);
+  } catch (err) {
+    layerObjectsError[code] = err?.message || String(err);
+    layerObjects[code] = [];
+  } finally {
+    layerObjectsLoading[code] = false;
+  }
+}
+
+function toggleLayerList(g) {
+  const code = g.code;
+  const opening = !expandedLayers[code];
+  expandedLayers[code] = opening;
+  if (opening) {
+    loadLayerObjects(g);
+  } else {
+    layerObjects[code] = [];
+    layerObjectsError[code] = '';
+  }
+}
+
+function onSearchInput() {
+  const q = searchQuery.value.trim();
+  clearTimeout(searchDebounce);
+  if (q.length < 2) {
+    searchResults.value = [];
+    searchLoading.value = false;
+    return;
+  }
+  searchLoading.value = true;
+  searchDebounce = setTimeout(async () => {
+    const readable = types.value.filter((t) => auth.hasObjectRead(t.code));
+    try {
+      const results = await Promise.all(
+        readable.map((t) =>
+          api.objects.list({ type: t.code, search: q, limit: 30 }),
+        ),
+      );
+      searchResults.value = results
+        .flat()
+        .sort((a, b) => a.id - b.id)
+        .slice(0, 30);
+    } catch (err) {
+      searchResults.value = [];
+    } finally {
+      searchLoading.value = false;
+    }
+  }, 300);
+}
+
+function pickSearchResult(o) {
+  searchResults.value = [];
+  searchQuery.value = '';
+  focusObject(o);
+}
+
+function toggleFab() {
+  fabOpen.value = !fabOpen.value;
+}
+
+function startCreateFromFab(t) {
+  fabOpen.value = false;
+  startCreate(t);
 }
 
 const grouped = computed(() =>
@@ -1004,15 +1152,49 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="map-shell">
+  <div class="map-shell" :class="{ 'panel-open': panelOpen }">
     <div ref="mapContainer" class="map"></div>
 
-    <aside class="panel">
+    <button
+      class="panel-toggle"
+      :class="{ open: panelOpen }"
+      @click="panelOpen = !panelOpen"
+    >
+      {{ panelOpen ? '✕' : '≡' }}
+    </button>
+
+    <aside class="panel" :class="{ 'panel-hidden': !panelOpen }">
       <div class="panel-header">
         <strong>{{ user?.name || user?.sub }}</strong>
         <button class="logout" @click="logout">Выйти</button>
       </div>
       <div class="panel-body">
+        <div class="search-box">
+          <input
+            v-model="searchQuery"
+            type="search"
+            placeholder="Поиск по объектам…"
+            autocomplete="off"
+            @input="onSearchInput"
+          />
+          <span v-if="searchLoading" class="search-hint">Поиск…</span>
+          <div v-else-if="searchQuery.trim().length >= 2 && searchResults.length === 0" class="search-hint">
+            Ничего не найдено
+          </div>
+          <div v-if="searchResults.length" class="search-results">
+            <button
+              v-for="o in searchResults"
+              :key="o.id"
+              class="search-item"
+              type="button"
+              @click="pickSearchResult(o)"
+            >
+              <span class="dot" :style="{ background: typeByCode(o.typeCode)?.color || '#888' }"></span>
+              <span class="search-type">{{ typeByCode(o.typeCode)?.name || o.typeCode }}</span>
+              <span class="search-label">{{ objectLabel(o) }}</span>
+            </button>
+          </div>
+        </div>
         <div
           v-for="g in grouped"
           :key="g.code"
@@ -1021,6 +1203,30 @@ onBeforeUnmount(() => {
           <div class="layer-name">
             <span class="dot" :style="{ background: g.color || '#888' }"></span>
             {{ g.name }}
+            <button
+              v-if="auth.hasObjectRead(g.types[0].code)"
+              class="list-toggle"
+              :title="expandedLayers[g.code] ? 'Свернуть список' : 'Показать объекты слоя'"
+              @click.stop="toggleLayerList(g)"
+            >{{ expandedLayers[g.code] ? '−' : '≡' }}</button>
+          </div>
+          <div v-if="expandedLayers[g.code]" class="layer-list">
+            <div v-if="layerObjectsLoading[g.code]" class="search-hint">Загрузка…</div>
+            <div v-else-if="layerObjectsError[g.code]" class="search-hint search-error">{{ layerObjectsError[g.code] }}</div>
+            <div v-else-if="!layerObjects[g.code]?.length" class="search-hint">
+              Нет объектов в видимой области
+            </div>
+            <button
+              v-for="o in layerObjects[g.code] || []"
+              :key="o.id"
+              class="search-item"
+              type="button"
+              @click="focusObject(o)"
+            >
+              <span class="dot" :style="{ background: typeByCode(o.typeCode)?.color || '#888' }"></span>
+              <span class="search-type">{{ typeByCode(o.typeCode)?.name }}</span>
+              <span class="search-label">{{ objectLabel(o) }}</span>
+            </button>
           </div>
           <label
             v-for="t in g.types"
@@ -1092,6 +1298,28 @@ onBeforeUnmount(() => {
         >Удалить</button>
       </div>
     </aside>
+
+    <div v-if="fabOpen" class="fab-menu">
+      <div class="fab-title">Добавить</div>
+      <button
+        v-for="t in types.filter((x) => auth.hasObjectWrite(x.code))"
+        :key="t.code"
+        class="fab-item"
+        @click="startCreateFromFab(t)"
+      >
+        <span class="dot" :style="{ background: t.color || '#888' }"></span>
+        {{ t.name }}
+      </button>
+      <button
+        v-if="relationTypes.some((r) => auth.hasRelationWrite(r.code))"
+        class="fab-item"
+        @click="fabOpen = false; openRelationForm()"
+      >
+        <span class="dot" :style="{ background: '#7c3aed' }"></span>
+        Связь
+      </button>
+    </div>
+    <button class="fab" title="Добавить объект" @click="toggleFab">+</button>
 
     <div v-if="modal.mode" class="modal-overlay" @click.self="closeModal">
       <div class="modal">
@@ -1431,6 +1659,180 @@ onBeforeUnmount(() => {
 .map {
   width: 100%;
   height: 100%;
+}
+
+.panel-toggle {
+  display: none;
+}
+
+.search-box {
+  position: relative;
+  margin-bottom: 8px;
+}
+
+.search-box input {
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.search-hint {
+  font-size: 12px;
+  color: #6b7280;
+  padding: 4px 0;
+}
+
+.search-error {
+  color: #991b1b;
+}
+
+.search-results {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.search-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  padding: 7px 9px;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  color: #111827;
+  cursor: pointer;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.search-item:last-child {
+  border-bottom: none;
+}
+
+.search-item:hover {
+  background: #f3f4f6;
+}
+
+.search-type {
+  color: #6b7280;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.search-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.list-toggle {
+  margin-left: auto;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #6b7280;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  flex: none;
+}
+
+.list-toggle:hover {
+  background: #e5e7eb;
+}
+
+.layer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 6px 16px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.layer-list .search-item {
+  border-bottom: none;
+  padding: 5px 7px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.fab {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  width: 52px;
+  height: 52px;
+  border: none;
+  border-radius: 50%;
+  background: #111827;
+  color: #fff;
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fab:hover {
+  background: #1f2937;
+}
+
+.fab-menu {
+  position: absolute;
+  right: 16px;
+  bottom: 76px;
+  width: 200px;
+  max-height: 50vh;
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+  z-index: 3;
+  padding: 6px;
+}
+
+.fab-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+  padding: 4px 8px 6px;
+}
+
+.fab-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 9px 8px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #111827;
+  cursor: pointer;
+}
+
+.fab-item:hover {
+  background: #f3f4f6;
 }
 
 .panel {
@@ -1858,4 +2260,124 @@ button.danger:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+@media (max-width: 700px) {
+  .panel-toggle {
+    display: flex;
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 4;
+    width: 44px;
+    height: 44px;
+    border: none;
+    border-radius: 8px;
+    background: #111827;
+    color: #fff;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+  }
+
+  .panel-toggle.open {
+    background: #4b5563;
+  }
+
+  .panel {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: auto;
+    max-height: 55vh;
+    border-radius: 12px 12px 0 0;
+    transition: transform 0.25s ease;
+  }
+
+  .panel.panel-hidden {
+    transform: translateY(110%);
+  }
+
+  .fab {
+    right: 12px;
+    bottom: 12px;
+  }
+
+  .fab-menu {
+    right: 12px;
+    bottom: 72px;
+  }
+
+  .panel-open .fab,
+  .panel-open .fab-menu {
+    display: none;
+  }
+
+  .modal-overlay {
+    align-items: stretch;
+  }
+
+  .modal {
+    width: 100%;
+    max-width: none;
+    border-radius: 0;
+  }
+
+  .modal-history {
+    width: 100%;
+  }
+
+  .history-list {
+    max-height: calc(100vh - 160px);
+  }
+
+  .add-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 8px;
+    font-size: 20px;
+  }
+
+  .type-toggle {
+    min-height: 44px;
+    padding: 4px 0;
+  }
+
+  .modal-actions button {
+    min-height: 44px;
+    flex: 1 1 100%;
+  }
+
+  .modal-actions {
+    flex-direction: column;
+  }
+
+  .field input,
+  .field select,
+  .field textarea {
+    font-size: 16px;
+    min-height: 44px;
+  }
+
+  .field-checkbox {
+    min-height: 44px;
+  }
+
+  .geo-item {
+    padding: 12px 10px;
+  }
+
+  .secondary {
+    min-height: 44px;
+  }
+
+  .search-box input {
+    min-height: 44px;
+    font-size: 16px;
+  }
+}
+
 </style>

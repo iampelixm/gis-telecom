@@ -35,6 +35,7 @@ export class ObjectsController {
       query.bbox,
       query.limit,
       query.offset,
+      query.search,
     );
   }
 

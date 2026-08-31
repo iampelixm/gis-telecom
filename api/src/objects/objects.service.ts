@@ -50,6 +50,7 @@ export class ObjectsService {
     bbox?: string,
     limit = 1000,
     offset = 0,
+    search?: string,
   ): Promise<ObjectRow[]> {
     const type = await this.requireType(typeCode);
 
@@ -76,6 +77,14 @@ export class ObjectsService {
       qb.andWhere(
         'o.geometry && ST_MakeEnvelope(:minLon, :minLat, :maxLon, :maxLat, 4326)',
         { minLon, minLat, maxLon, maxLat },
+      );
+    }
+
+    if (search && search.trim()) {
+      const needle = `%${search.trim()}%`;
+      qb.andWhere(
+        '(o.attrs::text ILIKE :search OR o."id"::text = :idMatch)',
+        { search: needle, idMatch: search.trim() },
       );
     }
 

@@ -3,6 +3,7 @@ import { h, onMounted, ref } from 'vue';
 import { useMessage, useDialog } from 'naive-ui';
 import type { DataTableColumns } from 'naive-ui';
 import { api, ApiError } from '../api';
+import AttrsSchemaEditor from '../components/AttrsSchemaEditor.vue';
 import { GEOMETRY_TYPES, type Layer, type ObjectType } from '../types';
 
 const message = useMessage();
@@ -22,7 +23,7 @@ const form = ref({
   color: '#2e7d32',
   icon: '',
   lineWidth: null as number | null,
-  attrsSchema: '{}',
+  attrsSchema: {} as Record<string, unknown>,
   isActive: true,
   sortOrder: 0,
 });
@@ -54,7 +55,7 @@ function openCreate() {
     color: '#2e7d32',
     icon: '',
     lineWidth: null,
-    attrsSchema: '{}',
+    attrsSchema: {},
     isActive: true,
     sortOrder: 0,
   };
@@ -71,24 +72,11 @@ function openEdit(row: ObjectType) {
     color: row.color || '',
     icon: row.icon || '',
     lineWidth: row.lineWidth,
-    attrsSchema: JSON.stringify(row.attrsSchema || {}, null, 2),
+    attrsSchema: row.attrsSchema || {},
     isActive: row.isActive,
     sortOrder: row.sortOrder,
   };
   showModal.value = true;
-}
-
-function parseAttrsSchema(): Record<string, unknown> {
-  try {
-    const parsed = JSON.parse(form.value.attrsSchema || '{}');
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error('schema must be a JSON object');
-    }
-    return parsed;
-  } catch (e) {
-    message.error(`Некорректный JSON attrsSchema: ${e instanceof Error ? e.message : e}`);
-    return null as unknown as Record<string, unknown>;
-  }
 }
 
 async function save() {
@@ -96,10 +84,7 @@ async function save() {
     message.warning('Заполните код и название');
     return;
   }
-  const attrsSchema = parseAttrsSchema();
-  if (!attrsSchema) {
-    return;
-  }
+  const attrsSchema = form.value.attrsSchema || {};
 
   saving.value = true;
   const payload = {
@@ -241,12 +226,7 @@ onMounted(load);
           <n-input-number v-model:value="form.lineWidth" :min="1" :max="20" />
         </n-form-item>
         <n-form-item label="Схема атрибутов (JSON Schema)">
-          <n-input
-            v-model:value="form.attrsSchema"
-            type="textarea"
-            :rows="8"
-            placeholder='{"type":"object","properties":{...}}'
-          />
+          <AttrsSchemaEditor v-model="form.attrsSchema" />
         </n-form-item>
         <n-form-item label="Порядок сортировки">
           <n-input-number v-model:value="form.sortOrder" :min="0" />

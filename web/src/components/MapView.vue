@@ -85,6 +85,25 @@ function shapeForType(t) {
   return SHAPE_BY_GEOM[t.geometryType] || 'marker';
 }
 
+function fieldWidget(def) {
+  if (def.enum) {
+    return 'select';
+  }
+  if (def.type === 'boolean') {
+    return 'checkbox';
+  }
+  if (def.type === 'integer' || def.type === 'number') {
+    return 'number';
+  }
+  if (def.format === 'date') {
+    return 'date';
+  }
+  if (def.format === 'textarea' || (def.type === 'string' && (def.minLength || 0) >= 100)) {
+    return 'textarea';
+  }
+  return 'text';
+}
+
 function schemaFields(t) {
   const schema = t.attrsSchema || {};
   const props = schema.properties || {};
@@ -93,6 +112,7 @@ function schemaFields(t) {
     key,
     label: key.replace(/_/g, ' '),
     type: def.type || 'string',
+    widget: fieldWidget(def),
     enum: def.enum || null,
     required: required.includes(key),
   }));
@@ -348,8 +368,12 @@ function openModal(mode, t, geometry, feature) {
   modal.values = {};
   modal.error = '';
   for (const f of modal.fields) {
-    if (f.type === 'integer' || f.type === 'number') {
-      modal.values[f.key] = f.type === 'integer' ? 0 : 0;
+    if (f.widget === 'number') {
+      modal.values[f.key] = 0;
+    } else if (f.widget === 'checkbox') {
+      modal.values[f.key] = false;
+    } else if (f.widget === 'date') {
+      modal.values[f.key] = '';
     }
   }
 }
@@ -917,16 +941,28 @@ onBeforeUnmount(() => {
             <span class="field-label">
               {{ f.label }}<i v-if="f.required" class="req">*</i>
             </span>
+            <template v-if="f.widget === 'checkbox'">
+              <input
+                type="checkbox"
+                class="field-checkbox"
+                v-model="modal.values[f.key]"
+              />
+            </template>
             <select
-              v-if="f.enum"
+              v-else-if="f.widget === 'select'"
               v-model="modal.values[f.key]"
             >
               <option v-for="opt in f.enum" :key="opt" :value="opt">{{ opt }}</option>
             </select>
+            <textarea
+              v-else-if="f.widget === 'textarea'"
+              v-model="modal.values[f.key]"
+              rows="3"
+            ></textarea>
             <input
               v-else
               v-model="modal.values[f.key]"
-              :type="f.type === 'integer' || f.type === 'number' ? 'number' : 'text'"
+              :type="f.widget === 'date' ? 'date' : (f.widget === 'number' ? 'number' : 'text')"
             />
           </label>
           <button
@@ -940,16 +976,28 @@ onBeforeUnmount(() => {
         <div v-else-if="modal.mode === 'edit'" class="modal-body">
           <label v-for="f in modal.fields" :key="f.key" class="field">
             <span class="field-label">{{ f.label }}</span>
+            <template v-if="f.widget === 'checkbox'">
+              <input
+                type="checkbox"
+                class="field-checkbox"
+                v-model="modal.values[f.key]"
+              />
+            </template>
             <select
-              v-if="f.enum"
+              v-else-if="f.widget === 'select'"
               v-model="modal.values[f.key]"
             >
               <option v-for="opt in f.enum" :key="opt" :value="opt">{{ opt }}</option>
             </select>
+            <textarea
+              v-else-if="f.widget === 'textarea'"
+              v-model="modal.values[f.key]"
+              rows="3"
+            ></textarea>
             <input
               v-else
               v-model="modal.values[f.key]"
-              :type="f.type === 'integer' || f.type === 'number' ? 'number' : 'text'"
+              :type="f.widget === 'date' ? 'date' : (f.widget === 'number' ? 'number' : 'text')"
             />
           </label>
           <div class="modal-actions">
@@ -1289,6 +1337,13 @@ onBeforeUnmount(() => {
   font-size: 13px;
   font-family: monospace;
   resize: vertical;
+}
+
+.field .field-checkbox {
+  width: auto;
+  align-self: flex-start;
+  padding: 0;
+  border: none;
 }
 
 .rel-info {

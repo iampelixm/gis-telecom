@@ -46,15 +46,14 @@ Claims: `sub` (user), `name`, `role`, `permissions[]`. Подписан общи
 - Фаза 1 (скелет): ✅ — весь стек работает, цепочка JWT проверена
 - Фаза 2 (ядро): ✅ — 2.1 ✅ (миграции БД + seed), 2.2 ✅ (generic-CRUD объектов), 2.3 ✅ (отдельное приложение `admin` + CRUD справочников), 2.4 ✅ (Martin v1.14.0 + MVT + фильтр по правам), 2.5 ✅ (web: карта со слоями из каталога + OSM-растр), 2.6 ✅ (переключатель слоёв по правам)
 - Фаза 3 (RBAC): ✅ — 3.1 ✅ (`ObjectPermissionGuard` на `/objects`, `PermissionsGuard` на каталоге), 3.2 ✅ (видимость слоёв по правам в web и тайлах), 3.3 ✅ (mock-auth: admin/engineer/viewer)
-- Фаза 4 (редактирование и UX): частично — 4.1 ✅ (geoman: создание/перемещение/правка геометрии/удаление), 4.2 🟡 (базовые формы атрибутов из attrs_schema), 4.3 🟡 (attrs_schema в admin как JSON-textarea), 4.4 ✅ (CRUD связей объектов: `/relations` + слой связей на карте, см. roadmap)
+- Фаза 4 (редактирование и UX): ✅ — 4.1 ✅ (geoman: создание/перемещение/правка геометрии/удаление), 4.2 ✅ (динамические формы атрибутов по attrs_schema: text/number/integer/enum/checkbox/date/textarea), 4.3 ✅ (структурный редактор attrs_schema в admin: AttrsSchemaEditor.vue + режим сырого JSON), 4.4 ✅ (CRUD связей объектов: `/relations` + слой связей на карте, см. roadmap)
 - Фаза 5 (OSM self-hosted, бэкап, TLS): не начата
 - Фаза 6 (geo + Dadata): запланирована, строится после фазы 4
 
 ## Ближайшие задачи (по порядку)
 
-1. Завершить фазу 4: 4.3 — структурный редактор attrs_schema в admin; 4.2 — расширить типы полей форм. (4.4 CRUD связей объектов реализован: эндпоинты `/relations` + отрисовка/создание/удаление на карте; при росте объёмов — перенос связей на MVT-тайлы, сейчас GeoJSON по bbox.)
-2. Фаза 5: self-hosted OSM ЮФО (tilemaker → .mbtiles → Martin), бэкап БД, TLS/HTTPS.
-3. Фаза 6: сервис `geo` (NestJS) + Redis + Dadata (mock-режим до ключей), подсказки адресов в web.
+1. Фаза 5: self-hosted OSM ЮФО (tilemaker → .mbtiles → Martin), бэкап БД, TLS/HTTPS. (Фаза 4 завершена: 4.2 — расширенные типы полей форм в web, 4.3 — редактор attrs_schema в admin, 4.4 — CRUD связей; при росте объёмов связей — перенос на MVT-тайлы, сейчас GeoJSON по bbox.)
+2. Фаза 6: сервис `geo` (NestJS) + Redis + Dadata (mock-режим до ключей), подсказки адресов в web.
 
 ## Полезные команды
 

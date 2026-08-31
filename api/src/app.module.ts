@@ -6,6 +6,7 @@ import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './health/health.module';
 import { MeModule } from './me/me.module';
 import { ObjectsModule } from './objects/objects.module';
+import { RelationsModule } from './relations/relations.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { ObjectsModule } from './objects/objects.module';
     HealthModule,
     MeModule,
     ObjectsModule,
+    RelationsModule,
     CatalogModule,
   ],
 })

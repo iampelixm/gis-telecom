@@ -12,6 +12,8 @@ const mapContainer = ref(null);
 const layers = ref([]);
 const types = ref([]);
 const visible = ref({});
+const relationTypes = ref([]);
+const relationVisible = ref({});
 
 const TILES_URL = import.meta.env.VITE_TILES_URL || '/tiles';
 
@@ -22,6 +24,24 @@ const creatingType = ref(null);
 const editingObjectId = ref(null);
 const editingTypeCode = ref(null);
 const selected = ref(null);
+const creatingRelation = ref(false);
+const relationFromOptions = ref([]);
+const relationToOptions = ref([]);
+const relForm = reactive({
+  relationType: '',
+  fromId: null,
+  toId: null,
+  attrsText: '',
+  error: '',
+});
+const relModal = reactive({
+  open: false,
+  relation: null,
+  relationTypeName: '',
+  attrsText: '',
+  saving: false,
+  error: '',
+});
 const modal = reactive({
   mode: null, // 'create' | 'edit'
   title: '',
@@ -79,12 +99,16 @@ function schemaFields(t) {
 }
 
 async function loadCatalog() {
-  const [layersRes, typesRes] = await Promise.all([
+  const [layersRes, typesRes, relTypesRes] = await Promise.all([
     api.layers.list(),
     api.objectTypes.list(),
+    api.relationTypes.list(),
   ]);
   layers.value = layersRes.filter((l) => l.isActive).sort((a, b) => a.sortOrder - b.sortOrder);
   types.value = typesRes.filter((t) => t.isActive).sort((a, b) => a.sortOrder - b.sortOrder);
+  relationTypes.value = relTypesRes
+    .filter((r) => r.isActive)
+    .sort((a, b) => a.id - b.id);
 
   const initial = {};
   for (const t of types.value) {
@@ -92,8 +116,16 @@ async function loadCatalog() {
   }
   visible.value = initial;
 
+  const relInitial = {};
+  for (const r of relationTypes.value) {
+    relInitial[r.code] = auth.hasRelationRead(r.code);
+  }
+  relationVisible.value = relInitial;
+
   addObjectLayers();
+  addRelationLayers();
   initGeoman();
+  map.on('moveend', onMoveEnd);
 }
 
 function addObjectLayers() {
@@ -167,6 +199,95 @@ function toggleType(t) {
       visible.value[t.code] ? 'visible' : 'none',
     );
   }
+}
+
+const RELATION_SOURCE = 'src-relations';
+
+function relationColor(r) {
+  return r.fromType?.color || r.toType?.color || '#7c3aed';
+}
+
+function relationLayerFor(r) {
+  return `relations-${r.code}`;
+}
+
+function addRelationLayers() {
+  if (!map.getSource(RELATION_SOURCE)) {
+    map.addSource(RELATION_SOURCE, {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] },
+    });
+  }
+  for (const r of relationTypes.value) {
+    const layerId = relationLayerFor(r);
+    if (!map.getLayer(layerId)) {
+      map.addLayer({
+        id: layerId,
+        type: 'line',
+        source: RELATION_SOURCE,
+        filter: ['==', 'relationType', r.code],
+        layout: {
+          visibility: relationVisible.value[r.code] ? 'visible' : 'none',
+          'line-cap': 'round',
+          'line-join': 'round',
+        },
+        paint: {
+          'line-color': relationColor(r),
+          'line-width': 2,
+          'line-dasharray': [4, 3],
+        },
+      });
+    }
+  }
+}
+
+function toggleRelation(r) {
+  relationVisible.value[r.code] = !relationVisible.value[r.code];
+  const layerId = relationLayerFor(r);
+  const layer = map?.getLayer(layerId);
+  if (layer) {
+    map.setLayoutProperty(
+      layerId,
+      'visibility',
+      relationVisible.value[r.code] ? 'visible' : 'none',
+    );
+  }
+}
+
+async function reloadRelations() {
+  if (!map) {
+    return;
+  }
+  const codes = relationTypes.value
+    .filter((r) => relationVisible.value[r.code] && auth.hasRelationRead(r.code))
+    .map((r) => r.code);
+  if (codes.length === 0) {
+    setRelationData({ type: 'FeatureCollection', features: [] });
+    return;
+  }
+  const b = map.getBounds();
+  const bbox = `${b.getWest()},${b.getSouth()},${b.getEast()},${b.getNorth()}`;
+  try {
+    const fc = await api.relations.list({ type: codes.join(','), bbox });
+    setRelationData(fc);
+  } catch (err) {
+    console.error('failed to load relations', err);
+  }
+}
+
+function setRelationData(fc) {
+  if (!map.getSource(RELATION_SOURCE)) {
+    return;
+  }
+  map.getSource(RELATION_SOURCE).setData(fc);
+}
+
+function onMoveEnd() {
+  reloadRelations();
+}
+
+function relationTypeByCode(code) {
+  return relationTypes.value.find((r) => r.code === code);
 }
 
 function initGeoman() {
@@ -331,6 +452,20 @@ async function onMapClick(e) {
   if (creatingType.value || editingObjectId.value !== null || !gm?.loaded) {
     return;
   }
+  const relLayerIds = relationTypes.value
+    .filter((r) => auth.hasRelationRead(r.code) && relationVisible.value[r.code])
+    .map((r) => relationLayerFor(r));
+  const relFeats = map.queryRenderedFeatures(
+    [
+      [e.point.x - 6, e.point.y - 6],
+      [e.point.x + 6, e.point.y + 6],
+    ],
+    { layers: relLayerIds },
+  );
+  if (relFeats.length) {
+    openRelationModal(relFeats[0]);
+    return;
+  }
   const ids = types.value
     .filter((t) => auth.hasObjectWrite(t.code) && auth.hasObjectRead(t.code))
     .map((t) => layerForType(t));
@@ -481,6 +616,143 @@ function recreateObjectSource() {
   addObjectLayers();
 }
 
+function openRelationForm() {
+  if (creatingRelation.value) {
+    return;
+  }
+  creatingRelation.value = true;
+  const writable = relationTypes.value.filter((r) => auth.hasRelationWrite(r.code));
+  relForm.relationType = writable[0]?.code || '';
+  relForm.fromId = null;
+  relForm.toId = null;
+  relForm.attrsText = '';
+  relForm.error = '';
+  loadRelationFormOptions();
+}
+
+async function loadRelationFormOptions() {
+  const rt = relationTypeByCode(relForm.relationType);
+  if (!rt) {
+    relationFromOptions.value = [];
+    relationToOptions.value = [];
+    return;
+  }
+  try {
+    const [fromRes, toRes] = await Promise.all([
+      api.objects.list({ type: rt.fromType.code }),
+      api.objects.list({ type: rt.toType.code }),
+    ]);
+    relationFromOptions.value = fromRes;
+    relationToOptions.value = toRes;
+  } catch (err) {
+    relForm.error = err?.message || String(err);
+  }
+}
+
+function relationFormFromLabel(o) {
+  return `${o.attrs?.inventory_number || o.attrs?.address || o.attrs?.device_type || ''} (#${o.id})`.trim();
+}
+
+async function submitRelationForm() {
+  if (!relForm.relationType || relForm.fromId == null || relForm.toId == null) {
+    relForm.error = 'Выберите тип связи и оба объекта';
+    return;
+  }
+  let attrs = {};
+  if (relForm.attrsText.trim()) {
+    try {
+      attrs = JSON.parse(relForm.attrsText);
+    } catch {
+      relForm.error = 'Атрибуты должны быть валидным JSON';
+      return;
+    }
+  }
+  try {
+    await api.relations.create({
+      relationType: relForm.relationType,
+      fromId: Number(relForm.fromId),
+      toId: Number(relForm.toId),
+      attrs,
+    });
+    creatingRelation.value = false;
+    reloadRelations();
+  } catch (err) {
+    relForm.error = err?.message || String(err);
+  }
+}
+
+function cancelRelationForm() {
+  creatingRelation.value = false;
+  relForm.error = '';
+}
+
+async function openRelationModal(feature) {
+  const props = feature?.properties || {};
+  const id = props.id;
+  if (id == null) {
+    return;
+  }
+  const rt = relationTypeByCode(props.relationType);
+  try {
+    const relation = await api.relations.get(Number(id));
+    relModal.open = true;
+    relModal.relation = relation;
+    relModal.relationTypeName = rt?.name || props.relationType;
+    relModal.attrsText = JSON.stringify(relation.attrs || {}, null, 2);
+    relModal.error = '';
+  } catch (err) {
+    console.error('failed to load relation', err);
+  }
+}
+
+function closeRelationModal() {
+  relModal.open = false;
+  relModal.relation = null;
+  relModal.error = '';
+}
+
+async function saveRelationAttrs() {
+  if (!relModal.relation) {
+    return;
+  }
+  let attrs;
+  try {
+    attrs = relModal.attrsText.trim() ? JSON.parse(relModal.attrsText) : {};
+  } catch {
+    relModal.error = 'Атрибуты должны быть валидным JSON';
+    return;
+  }
+  relModal.saving = true;
+  try {
+    relModal.relation = await api.relations.update(relModal.relation.id, { attrs });
+    relModal.attrsText = JSON.stringify(attrs, null, 2);
+    reloadRelations();
+  } catch (err) {
+    relModal.error = err?.message || String(err);
+  } finally {
+    relModal.saving = false;
+  }
+}
+
+async function removeRelation() {
+  if (!relModal.relation) {
+    return;
+  }
+  if (!window.confirm('Удалить связь?')) {
+    return;
+  }
+  relModal.saving = true;
+  try {
+    await api.relations.remove(relModal.relation.id);
+    closeRelationModal();
+    reloadRelations();
+  } catch (err) {
+    relModal.error = err?.message || String(err);
+  } finally {
+    relModal.saving = false;
+  }
+}
+
 function logout() {
   auth.logout();
 }
@@ -527,6 +799,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  map.off('moveend', onMoveEnd);
   if (gm) {
     map.off('gm:create', onFeatureCreated);
     map.off('gm:dragend', onFeatureEditEnd);
@@ -580,6 +853,38 @@ onBeforeUnmount(() => {
             >+</button>
           </label>
         </div>
+        <div v-if="relationTypes.length" class="layer-group">
+          <div class="layer-name">
+            <span class="dot" :style="{ background: '#7c3aed' }"></span>
+            Связи
+            <button
+              v-if="relationTypes.some((r) => auth.hasRelationWrite(r.code))"
+              class="add-btn"
+              :class="{ active: creatingRelation }"
+              :disabled="creatingRelation"
+              title="Добавить связь"
+              @click="openRelationForm"
+            >+</button>
+          </div>
+          <label
+            v-for="r in relationTypes"
+            :key="r.code"
+            class="type-toggle"
+          >
+            <input
+              type="checkbox"
+              :checked="relationVisible[r.code]"
+              :disabled="!auth.hasRelationRead(r.code)"
+              @change="toggleRelation(r)"
+            />
+            <span class="dot" :style="{ background: relationColor(r) }"></span>
+            {{ r.name }}
+          </label>
+        </div>
+      </div>
+      <div v-if="creatingRelation" class="draw-bar">
+        <span>Новая связь</span>
+        <button @click="cancelRelationForm">Отмена</button>
       </div>
       <div v-if="creatingType" class="draw-bar">
         <span>Кликните на карту, чтобы нарисовать «{{ creatingType.name }}»</span>
@@ -669,6 +974,86 @@ onBeforeUnmount(() => {
             >
               Изменить геометрию
             </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="creatingRelation" class="modal-overlay" @click.self="cancelRelationForm">
+      <div class="modal">
+        <div class="modal-header">
+          <strong>Новая связь</strong>
+          <button class="modal-close" @click="cancelRelationForm">×</button>
+        </div>
+        <div v-if="relForm.error" class="modal-error">{{ relForm.error }}</div>
+        <form class="modal-body" @submit.prevent="submitRelationForm">
+          <label class="field">
+            <span class="field-label">Тип связи</span>
+            <select v-model="relForm.relationType" @change="loadRelationFormOptions">
+              <option
+                v-for="r in relationTypes.filter((x) => auth.hasRelationWrite(x.code))"
+                :key="r.code"
+                :value="r.code"
+              >{{ r.name }}</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field-label">Источник ({{ relationTypeByCode(relForm.relationType)?.fromType?.name }})</span>
+            <select v-model="relForm.fromId">
+              <option
+                v-for="o in relationFromOptions"
+                :key="o.id"
+                :value="o.id"
+              >{{ relationFormFromLabel(o) }}</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field-label">Назначение ({{ relationTypeByCode(relForm.relationType)?.toType?.name }})</span>
+            <select v-model="relForm.toId">
+              <option
+                v-for="o in relationToOptions"
+                :key="o.id"
+                :value="o.id"
+              >{{ relationFormFromLabel(o) }}</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field-label">Атрибуты (JSON, необязательно)</span>
+            <textarea v-model="relForm.attrsText" rows="3"></textarea>
+          </label>
+          <button type="submit" class="primary">Создать</button>
+        </form>
+      </div>
+    </div>
+
+    <div v-if="relModal.open" class="modal-overlay" @click.self="closeRelationModal">
+      <div class="modal">
+        <div class="modal-header">
+          <strong>Связь: {{ relModal.relationTypeName }}</strong>
+          <button class="modal-close" @click="closeRelationModal">×</button>
+        </div>
+        <div v-if="relModal.error" class="modal-error">{{ relModal.error }}</div>
+        <div class="modal-body">
+          <div class="rel-info">
+            <div>#{{ relModal.relation?.id }} · {{ relModal.relation?.fromTypeCode }} #{{ relModal.relation?.fromId }} → {{ relModal.relation?.toTypeCode }} #{{ relModal.relation?.toId }}</div>
+          </div>
+          <label class="field">
+            <span class="field-label">Атрибуты (JSON)</span>
+            <textarea v-model="relModal.attrsText" rows="6"></textarea>
+          </label>
+          <div class="modal-actions">
+            <button
+              v-if="relModal.relation && auth.hasRelationWrite(relModal.relation.relationTypeCode)"
+              class="primary"
+              :disabled="relModal.saving"
+              @click="saveRelationAttrs"
+            >Сохранить</button>
+            <button
+              v-if="relModal.relation && auth.hasRelationWrite(relModal.relation.relationTypeCode)"
+              class="danger"
+              :disabled="relModal.saving"
+              @click="removeRelation"
+            >Удалить</button>
           </div>
         </div>
       </div>
@@ -895,6 +1280,23 @@ onBeforeUnmount(() => {
   border: 1px solid #d1d5db;
   border-radius: 6px;
   font-size: 13px;
+}
+
+.field textarea {
+  padding: 6px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: monospace;
+  resize: vertical;
+}
+
+.rel-info {
+  font-size: 13px;
+  color: #374151;
+  background: #f3f4f6;
+  padding: 8px;
+  border-radius: 6px;
 }
 
 .modal-actions {

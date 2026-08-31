@@ -69,12 +69,45 @@ export const api = {
     list: () => request('/catalog/object-types'),
   },
 
+  relationTypes: {
+    list: () => request('/catalog/relation-types'),
+  },
+
   objects: {
+    list: (query) => {
+      const params = new URLSearchParams();
+      for (const [k, v] of Object.entries(query || {})) {
+        if (v !== undefined && v !== null && v !== '') {
+          params.set(k, String(v));
+        }
+      }
+      const qs = params.toString();
+      return request(`/objects${qs ? `?${qs}` : ''}`);
+    },
     get: (id) => request(`/objects/${id}`),
     create: (payload) =>
       request('/objects', { method: 'POST', ...jsonBody(payload) }),
     update: (id, payload) =>
       request(`/objects/${id}`, { method: 'PATCH', ...jsonBody(payload) }),
     remove: (id) => request(`/objects/${id}`, { method: 'DELETE' }),
+  },
+
+  relations: {
+    list: (query) => {
+      const params = new URLSearchParams();
+      for (const [k, v] of Object.entries(query || {})) {
+        if (v !== undefined && v !== null && v !== '') {
+          params.set(k, String(v));
+        }
+      }
+      const qs = params.toString();
+      return request(`/relations${qs ? `?${qs}` : ''}`);
+    },
+    get: (id) => request(`/relations/${id}`),
+    create: (payload) =>
+      request('/relations', { method: 'POST', ...jsonBody(payload) }),
+    update: (id, payload) =>
+      request(`/relations/${id}`, { method: 'PATCH', ...jsonBody(payload) }),
+    remove: (id) => request(`/relations/${id}`, { method: 'DELETE' }),
   },
 };

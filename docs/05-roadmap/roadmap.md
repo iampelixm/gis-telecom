@@ -52,7 +52,7 @@
 | 4.1 | Инструменты рисования/редактирования на карте | ✅ | **maplibre-gl-geoman**: создание кликом, перемещение, правка геометрии, удаление; выбор объекта с приоритетом point > line > polygon; `--cache-expiry 5s` у Martin для быстрой инвалидации тайлов |
 | 4.2 | Динамические формы атрибутов по attrs_schema | 🟡 | есть базовые типы полей (text/number/integer/enum) из `attrsSchema` в web; расширить набор типов |
 | 4.3 | Редактор attrs_schema в админке `admin` | 🟡 | пока сырой JSON-textarea в форме типа (ObjectTypesView.vue); нужен структурный редактор |
-| 4.4 | CRUD связей объектов на карте | ⬜ | таблица `object_relations` в БД есть, эндпоинтов и UI нет |
+| 4.4 | CRUD связей объектов на карте | ✅ | `RelationsModule` (GET list GeoJSON по bbox / GET /:id / POST / PATCH / DELETE), `RelationPermissionGuard` по `object-relations:<code>:read|write`; web: слой связей GeoJSON (dashed-линии по типам, видимость по правам), форма создания (тип → источник → назначение), клик по линии → свойства/удаление; валидация типов концов по fromType/toType |
 
 ## Фаза 5. Полировка и OSM self-hosted
 

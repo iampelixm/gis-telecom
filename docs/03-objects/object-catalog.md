@@ -129,3 +129,17 @@ JSON Schema (Draft 2020-12), валидация в `api` через `ajv`.
 - Тайлы и права — решено: ADR-002 (nginx `auth_request` → `/api/me` → `X-Object-Types` → `types` в SQL-функции).
 - Мульти-геометрии: API уже принимает `multipoint`/`multilinestring`/`multipolygon` (`GEOJSON_TO_GEOMETRY_TYPE`), в seed используются базовые.
 - Нужна ли мягкое удаление (`deleted_at`) объектов для истории.
+
+## Эндпоинты связей (`/api/relations`)
+
+Реализовано (фаза 4.4, `RelationsModule` в `api/src/relations/`). Доступ по `object-relations:<code>:read|write` через `RelationPermissionGuard` (аналог `ObjectPermissionGuard`).
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | `/relations?type=<code>&bbox=…` | GeoJSON `FeatureCollection` линий (LineString между центроидами from/to) для карты; фильтр по типу связи и bbox |
+| GET | `/relations/:id` | Детали связи с `fromTypeCode`/`toTypeCode` и геометриями концов |
+| POST | `/relations` | Создать: `{relationType, fromId, toId, attrs?}`; проверка, что from/to — активные типы по `fromTypeId`/`toTypeId` |
+| PATCH | `/relations/:id` | Обновить `attrs` (смена концов — пересоздание) |
+| DELETE | `/relations/:id` | Удалить |
+
+Отрисовка на карте: GeoJSON-источник по bbox (перезапрос на `moveend`), видимость по типам связей, клик по линии → свойства/удаление, форма создания (тип → источник → назначение). При росте объёмов — перенос на MVT-тайлы (гибридный план, см. roadmap 4.4).

@@ -30,7 +30,7 @@ Geofabrik: russia-southern-federal-district-latest.osm.pbf
 5. ⬜ Настроить Martin на отдачу `.mbtiles`.
 6. ⬜ Подключить стиль OpenMapTiles в frontend.
 
-Приоритет: не прерывать ядро объектов. Self-hosted OSM — фаза 5, после завершения фазы 4.
+Приоритет: не прерывать ядро объектов. Self-hosted OSM — в TODO (бэклог, roadmap T.1).
 
 ## Замечания по серверу
 

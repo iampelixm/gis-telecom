@@ -54,14 +54,20 @@
 | 4.3 | Редактор attrs_schema в админке `admin` | ✅ | `AttrsSchemaEditor.vue`: структурный редактор полей (имя, виджет, enum, min/max, обязательное) + переключатель на сырой JSON |
 | 4.4 | CRUD связей объектов на карте | ✅ | `RelationsModule` (GET list GeoJSON по bbox / GET /:id / POST / PATCH / DELETE), `RelationPermissionGuard` по `object-relations:<code>:read|write`; web: слой связей GeoJSON (dashed-линии по типам, видимость по правам), форма создания (тип → источник → назначение), клик по линии → свойства/удаление; валидация типов концов по fromType/toType |
 
-## Фаза 5. Полировка и OSM self-hosted
+## Фаза 5. Резервное копирование и полировка
 
 | # | Задача | Статус | Примечание |
 |---|--------|--------|------------|
-| 5.1 | Self-hosted OSM ЮФО (tilemaker → .mbtiles → Martin) | ⬜ | map-basemap.md |
-| 5.2 | Резервное копирование db | ⬜ | |
-| 5.3 | TLS/HTTPS на proxy | ⬜ | нужен домен |
-| 5.4 | Аудит изменений (история) | ⬜ | по требованию |
+| 5.1 | Резервное копирование (Velero + restic + S3, ежедневно, 30 дней) | ⬜ | схема в docs/02-architecture/backup.md; целевая среда — кластер summersite (k3s) |
+| 5.2 | TLS/HTTPS | ✅ | на текущем этапе TLS обеспечивает кластер (Traefik + cert-manager); отдельный TLS на compose-прокси не требуется |
+| 5.3 | Аудит изменений (история) | ⬜ | по требованию |
+
+## TODO (бэклог, вне фаз)
+
+| # | Задача | Статус | Примечание |
+|---|--------|--------|------------|
+| T.1 | Self-hosted OSM ЮФО (tilemaker → .mbtiles → Martin) | ⬜ | map-basemap.md |
+| T.2 | Развёртывание d_map в кластер summersite (k3s) | ⬜ | целевая среда кластера; конвертация compose → Kubernetes-манифесты |
 
 ## Фаза 6. Геокодирование (geo + Dadata)
 

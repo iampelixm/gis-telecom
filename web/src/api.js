@@ -68,4 +68,13 @@ export const api = {
   objectTypes: {
     list: () => request('/catalog/object-types'),
   },
+
+  objects: {
+    get: (id) => request(`/objects/${id}`),
+    create: (payload) =>
+      request('/objects', { method: 'POST', ...jsonBody(payload) }),
+    update: (id, payload) =>
+      request(`/objects/${id}`, { method: 'PATCH', ...jsonBody(payload) }),
+    remove: (id) => request(`/objects/${id}`, { method: 'DELETE' }),
+  },
 };

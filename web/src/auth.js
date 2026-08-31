@@ -19,6 +19,10 @@ export const auth = {
     return this.hasPermission(`objects:${typeCode}:read`);
   },
 
+  hasObjectWrite(typeCode) {
+    return this.hasPermission(`objects:${typeCode}:write`);
+  },
+
   async login(username) {
     const { token } = await api.login(username);
     localStorage.setItem('token', token);

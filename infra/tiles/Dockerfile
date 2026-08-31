@@ -15,4 +15,4 @@ ENV MARTIN_CONNECTION_POOL_SIZE=8
 
 EXPOSE 3200
 
-ENTRYPOINT ["martin", "-c", "/etc/martin/config.yaml", "--listen-addresses", "0.0.0.0:3200"]
+ENTRYPOINT ["martin", "-c", "/etc/martin/config.yaml", "--listen-addresses", "0.0.0.0:3200", "--cache-expiry", "5s"]

@@ -17,11 +17,15 @@ import { RequireObjectPermission } from './object-permission.decorator';
 import { CreateObjectDto, UpdateObjectDto } from './dto/object.dto';
 import { ListObjectsQuery } from './dto/list-objects-query.dto';
 import { ObjectsService } from './objects.service';
+import { AuditService } from '../audit/audit.service';
 
 @Controller('objects')
 @UseGuards(JwtAuthGuard, ObjectPermissionGuard)
 export class ObjectsController {
-  constructor(private readonly objectsService: ObjectsService) {}
+  constructor(
+    private readonly objectsService: ObjectsService,
+    private readonly auditService: AuditService,
+  ) {}
 
   @Get()
   @RequireObjectPermission('read')
@@ -32,6 +36,12 @@ export class ObjectsController {
       query.limit,
       query.offset,
     );
+  }
+
+  @Get(':id/history')
+  @RequireObjectPermission('read')
+  history(@Param('id', ParseIntPipe) id: number) {
+    return this.auditService.findByEntity('object', id);
   }
 
   @Get(':id')
@@ -61,7 +71,10 @@ export class ObjectsController {
 
   @Delete(':id')
   @RequireObjectPermission('write')
-  remove(@Param('id', ParseIntPipe) id: number) {
-    return this.objectsService.remove(id);
+  remove(
+    @Param('id', ParseIntPipe) id: number,
+    @Request() req: { user: { sub: string } },
+  ) {
+    return this.objectsService.remove(id, req.user.sub);
   }
 }

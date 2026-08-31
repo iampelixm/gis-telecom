@@ -50,8 +50,42 @@ const modal = reactive({
   fields: [],
   values: {},
   error: '',
+  owner: null,
 });
 const saving = ref(false);
+const historyModal = reactive({
+  open: false,
+  title: '',
+  entries: [],
+  loading: false,
+  error: '',
+});
+
+const ACTION_LABELS = {
+  created: 'Создание',
+  updated: 'Изменение атрибутов',
+  moved: 'Перемещение/правка геометрии',
+  deleted: 'Удаление',
+};
+
+function fmtDate(v) {
+  if (!v) return '—';
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return String(v);
+  return d.toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function fmtValue(v) {
+  if (v === null || v === undefined || v === '') return '—';
+  if (typeof v === 'object') return JSON.stringify(v);
+  return String(v);
+}
 
 const grouped = computed(() =>
   layers.value
@@ -568,6 +602,12 @@ function showObject(id, typeCode) {
       modal.geometry = row.geometry;
       modal.fields = schemaFields(t);
       modal.values = { ...(row.attrs || {}) };
+      modal.owner = {
+        createdBy: row.createdBy,
+        updatedBy: row.updatedBy,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      };
       modal.error = '';
     })
     .catch((err) => {
@@ -614,9 +654,31 @@ async function removeObject() {
   }
 }
 
+async function openHistory(entityType, entityId, title) {
+  historyModal.open = true;
+  historyModal.title = title;
+  historyModal.entries = [];
+  historyModal.loading = true;
+  historyModal.error = '';
+  try {
+    historyModal.entries = await api.history(entityType, entityId);
+  } catch (err) {
+    historyModal.error = err?.message || String(err);
+  } finally {
+    historyModal.loading = false;
+  }
+}
+
+function closeHistory() {
+  historyModal.open = false;
+  historyModal.entries = [];
+  historyModal.error = '';
+}
+
 function closeModal() {
   modal.mode = null;
   modal.error = '';
+  modal.owner = null;
 }
 
 function showObjectGeometry() {
@@ -1000,6 +1062,18 @@ onBeforeUnmount(() => {
               :type="f.widget === 'date' ? 'date' : (f.widget === 'number' ? 'number' : 'text')"
             />
           </label>
+          <div v-if="modal.owner" class="owner-info">
+            <div class="owner-row">
+              <span>Создал:</span>
+              <strong>{{ modal.owner.createdBy || '—' }}</strong>
+              <span class="owner-date">{{ fmtDate(modal.owner.createdAt) }}</span>
+            </div>
+            <div class="owner-row">
+              <span>Изменил:</span>
+              <strong>{{ modal.owner.updatedBy || '—' }}</strong>
+              <span class="owner-date">{{ fmtDate(modal.owner.updatedAt) }}</span>
+            </div>
+          </div>
           <div class="modal-actions">
             <button
               class="primary"
@@ -1021,6 +1095,13 @@ onBeforeUnmount(() => {
               @click="showObjectGeometry"
             >
               Изменить геометрию
+            </button>
+            <button
+              class="primary"
+              :disabled="saving"
+              @click="openHistory('object', modal.objectId, `История: ${modal.title}`)"
+            >
+              История
             </button>
           </div>
         </div>
@@ -1084,6 +1165,11 @@ onBeforeUnmount(() => {
         <div class="modal-body">
           <div class="rel-info">
             <div>#{{ relModal.relation?.id }} · {{ relModal.relation?.fromTypeCode }} #{{ relModal.relation?.fromId }} → {{ relModal.relation?.toTypeCode }} #{{ relModal.relation?.toId }}</div>
+            <div class="owner-row">
+              <span>Создал:</span>
+              <strong>{{ relModal.relation?.createdBy || '—' }}</strong>
+              <span class="owner-date">{{ fmtDate(relModal.relation?.createdAt) }}</span>
+            </div>
           </div>
           <label class="field">
             <span class="field-label">Атрибуты (JSON)</span>
@@ -1102,6 +1188,66 @@ onBeforeUnmount(() => {
               :disabled="relModal.saving"
               @click="removeRelation"
             >Удалить</button>
+            <button
+              v-if="relModal.relation"
+              class="primary"
+              :disabled="relModal.saving"
+              @click="openHistory('relation', relModal.relation.id, `История: ${relModal.relationTypeName}`)"
+            >История</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="historyModal.open" class="modal-overlay" @click.self="closeHistory">
+      <div class="modal modal-history">
+        <div class="modal-header">
+          <strong>{{ historyModal.title }}</strong>
+          <button class="modal-close" @click="closeHistory">×</button>
+        </div>
+        <div v-if="historyModal.error" class="modal-error">{{ historyModal.error }}</div>
+        <div class="modal-body">
+          <div v-if="historyModal.loading" class="history-empty">Загрузка…</div>
+          <div v-else-if="historyModal.entries.length === 0" class="history-empty">
+            История пуста
+          </div>
+          <div v-else class="history-list">
+            <div v-for="e in historyModal.entries" :key="e.id" class="history-entry">
+              <div class="history-head">
+                <strong>{{ ACTION_LABELS[e.action] || e.action }}</strong>
+                <span class="owner-date">{{ fmtDate(e.createdAt) }}</span>
+              </div>
+              <div class="history-actor">{{ e.actor || '—' }}</div>
+              <div
+                v-if="e.changes?.attrs && Object.keys(e.changes.attrs).length"
+                class="history-changes"
+              >
+                <div
+                  v-for="(val, key) in e.changes.attrs"
+                  :key="key"
+                  class="history-change"
+                >
+                  <span class="history-key">{{ key }}</span>:
+                  <span class="history-old">{{ fmtValue(val.before) }}</span>
+                  → <span class="history-new">{{ fmtValue(val.after) }}</span>
+                </div>
+              </div>
+              <div
+                v-if="e.changes?.geometry"
+                class="history-changes"
+              >
+                Геометрия изменена
+              </div>
+              <div
+                v-if="e.action === 'created'"
+                class="history-changes"
+              >
+                <div class="history-change" v-for="(val, key) in e.changes?.attrs" :key="key">
+                  <span class="history-key">{{ key }}</span>:
+                  <span class="history-new">{{ fmtValue(val) }}</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1354,9 +1500,104 @@ onBeforeUnmount(() => {
   border-radius: 6px;
 }
 
+.owner-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #374151;
+  background: #f3f4f6;
+  padding: 8px;
+  border-radius: 6px;
+}
+
+.owner-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.owner-date {
+  margin-left: auto;
+  color: #9ca3af;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.modal-history {
+  width: 480px;
+  max-width: calc(100% - 32px);
+}
+
+.history-empty {
+  padding: 16px;
+  text-align: center;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.history-entry {
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 13px;
+}
+
+.history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.history-actor {
+  color: #6b7280;
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.history-changes {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: #374151;
+  background: #f9fafb;
+  border-radius: 4px;
+  padding: 6px;
+  word-break: break-word;
+}
+
+.history-change {
+  line-height: 1.4;
+}
+
+.history-key {
+  font-weight: 600;
+}
+
+.history-old {
+  color: #b91c1c;
+  text-decoration: line-through;
+}
+
+.history-new {
+  color: #15803d;
+}
+
 .modal-actions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 button.primary,

@@ -9,6 +9,7 @@ import { ObjectRelation } from '../objects/entities/object-relation.entity';
 import { RelationType } from '../objects/entities/relation-type.entity';
 import { ObjectEntity } from '../objects/entities/object.entity';
 import { CreateRelationDto, UpdateRelationDto } from './dto/relation.dto';
+import { AuditService } from '../audit/audit.service';
 
 export interface RelationRow {
   id: number;
@@ -36,6 +37,7 @@ export class RelationsService {
     private readonly relationTypesRepo: Repository<RelationType>,
     @InjectRepository(ObjectEntity)
     private readonly objectsRepo: Repository<ObjectEntity>,
+    private readonly auditService: AuditService,
   ) {}
 
   async list(
@@ -121,23 +123,78 @@ export class RelationsService {
       [type.id, dto.fromId, dto.toId, dto.attrs || {}, userId],
     );
     const id = Number(result[0]?.id);
-    return this.getById(id);
+    const created = await this.getById(id);
+    await this.auditService.log({
+      entityType: 'relation',
+      entityId: id,
+      typeCode: type.code,
+      action: 'created',
+      actor: userId,
+      changes: {
+        fromId: dto.fromId,
+        toId: dto.toId,
+        attrs: dto.attrs || {},
+      },
+    });
+    return created;
   }
 
-  async update(id: number, dto: UpdateRelationDto): Promise<RelationDetailRow> {
+  async update(
+    id: number,
+    dto: UpdateRelationDto,
+    userId: string,
+  ): Promise<RelationDetailRow> {
     const existing = await this.getById(id);
+    const before = existing.attrs;
+    const after =
+      dto.attrs !== undefined ? dto.attrs : existing.attrs;
     await this.relationsRepo.query(
       `UPDATE "object_relations"
        SET attrs = $2
        WHERE id = $1`,
-      [id, dto.attrs !== undefined ? dto.attrs : existing.attrs],
+      [id, after],
     );
-    return this.getById(id);
+    const updated = await this.getById(id);
+
+    const changed: Record<string, { before: unknown; after: unknown }> = {};
+    for (const key of new Set([
+      ...Object.keys(before || {}),
+      ...Object.keys(after || {}),
+    ])) {
+      const b = before?.[key];
+      const a = after?.[key];
+      if (JSON.stringify(b) !== JSON.stringify(a)) {
+        changed[key] = { before: b ?? null, after: a ?? null };
+      }
+    }
+    if (Object.keys(changed).length > 0) {
+      await this.auditService.log({
+        entityType: 'relation',
+        entityId: id,
+        typeCode: existing.relationTypeCode,
+        action: 'updated',
+        actor: userId,
+        changes: { attrs: changed },
+      });
+    }
+    return updated;
   }
 
-  async remove(id: number): Promise<{ id: number }> {
-    await this.getById(id);
+  async remove(id: number, userId: string): Promise<{ id: number }> {
+    const existing = await this.getById(id);
     await this.relationsRepo.delete(id);
+    await this.auditService.log({
+      entityType: 'relation',
+      entityId: id,
+      typeCode: existing.relationTypeCode,
+      action: 'deleted',
+      actor: userId,
+      changes: {
+        fromId: existing.fromId,
+        toId: existing.toId,
+        attrs: existing.attrs,
+      },
+    });
     return { id };
   }
 

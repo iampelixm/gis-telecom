@@ -9,6 +9,7 @@ import Ajv, { ValidateFunction } from 'ajv';
 import { ObjectType } from './entities/object-type.entity';
 import { ObjectEntity } from './entities/object.entity';
 import { CreateObjectDto, UpdateObjectDto } from './dto/object.dto';
+import { AuditService } from '../audit/audit.service';
 
 export interface ObjectRow {
   id: number;
@@ -41,6 +42,7 @@ export class ObjectsService {
     private readonly objectsRepo: Repository<ObjectEntity>,
     @InjectRepository(ObjectType)
     private readonly typesRepo: Repository<ObjectType>,
+    private readonly auditService: AuditService,
   ) {}
 
   async list(
@@ -117,7 +119,16 @@ export class ObjectsService {
       [type.id, JSON.stringify(dto.geometry), dto.attrs || {}, userId],
     );
     const id = Number(result[0]?.id);
-    return this.getById(id);
+    const created = await this.getById(id);
+    await this.auditService.log({
+      entityType: 'object',
+      entityId: id,
+      typeCode: type.code,
+      action: 'created',
+      actor: userId,
+      changes: { attrs: dto.attrs || {}, geometry: dto.geometry },
+    });
+    return created;
   }
 
   async update(
@@ -150,12 +161,57 @@ export class ObjectsService {
       `UPDATE objects SET ${sets.join(', ')} WHERE id = $1`,
       params,
     );
-    return this.getById(id);
+    const updated = await this.getById(id);
+
+    if (dto.geometry) {
+      await this.auditService.log({
+        entityType: 'object',
+        entityId: id,
+        typeCode: existing.typeCode,
+        action: 'moved',
+        actor: userId,
+        changes: {
+          geometry: {
+            before: existing.geometry,
+            after: updated.geometry,
+          },
+        },
+      });
+    }
+    if (dto.attrs !== undefined) {
+      const before = existing.attrs;
+      const after = updated.attrs;
+      const changed = this.diffAttrs(before, after);
+      if (Object.keys(changed).length > 0) {
+        await this.auditService.log({
+          entityType: 'object',
+          entityId: id,
+          typeCode: existing.typeCode,
+          action: 'updated',
+          actor: userId,
+          changes: { attrs: changed },
+        });
+      }
+    }
+
+    return updated;
   }
 
-  async remove(id: number): Promise<{ id: number }> {
-    await this.getById(id);
+  async remove(id: number, userId: string): Promise<{ id: number }> {
+    const existing = await this.getById(id);
     await this.objectsRepo.delete(id);
+    await this.auditService.log({
+      entityType: 'object',
+      entityId: id,
+      typeCode: existing.typeCode,
+      action: 'deleted',
+      actor: userId,
+      changes: {
+        attrs: existing.attrs,
+        geometry: existing.geometry,
+        typeCode: existing.typeCode,
+      },
+    });
     return { id };
   }
 
@@ -202,6 +258,25 @@ export class ObjectsService {
       this.validators.set(code, validate);
     }
     return validate;
+  }
+
+  private diffAttrs(
+    before: Record<string, unknown>,
+    after: Record<string, unknown>,
+  ): Record<string, { before: unknown; after: unknown }> {
+    const keys = new Set([
+      ...Object.keys(before || {}),
+      ...Object.keys(after || {}),
+    ]);
+    const changed: Record<string, { before: unknown; after: unknown }> = {};
+    for (const key of keys) {
+      const b = before?.[key];
+      const a = after?.[key];
+      if (JSON.stringify(b) !== JSON.stringify(a)) {
+        changed[key] = { before: b ?? null, after: a ?? null };
+      }
+    }
+    return changed;
   }
 
   private mapRow(r: Record<string, unknown>): ObjectRow {

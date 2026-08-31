@@ -73,6 +73,9 @@ export const api = {
     list: () => request('/catalog/relation-types'),
   },
 
+  history: (entityType, entityId) =>
+    request(`/history?entityType=${entityType}&entityId=${entityId}`),
+
   objects: {
     list: (query) => {
       const params = new URLSearchParams();

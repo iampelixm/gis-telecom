@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { CatalogModule } from './catalog/catalog.module';
 import { DatabaseModule } from './database/database.module';
@@ -13,6 +14,7 @@ import { RelationsModule } from './relations/relations.module';
     ConfigModule.forRoot({ isGlobal: true }),
     AuthModule,
     DatabaseModule,
+    AuditModule,
     HealthModule,
     MeModule,
     ObjectsModule,
